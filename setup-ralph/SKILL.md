@@ -75,8 +75,9 @@ Walk the user through these one at a time — present, get an answer, move on:
 
 **Never write `.claude/settings.local.json`.** That is the user's own file;
 its broad worker allowlist would leak into their everyday sessions. The
-`orchestrate-ralph` skill copies `.ralph/settings.json` into place at run time
-and restores afterwards.
+`orchestrate-ralph` skill places `.ralph/settings.json` there at run time in a
+fresh worktree — and treats a pre-existing, differing `settings.local.json` as
+a fatal "checkout not clean enough" error.
 
 ### 4. Done
 

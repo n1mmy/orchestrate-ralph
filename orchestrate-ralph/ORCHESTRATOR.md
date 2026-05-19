@@ -131,10 +131,12 @@ rule is stated here so you never even attempt it.
      in place is acceptable only if the two conditions above hold and the branch
      is one they are happy to hand back.
 2. **Worker permissions are in place.** Sub-agents inherit this session's
-   permissions. The `orchestrate-ralph` skill copies `.ralph/settings.json`
-   into `.claude/settings.local.json` before invoking this doctrine; if that
-   has not happened, worker `Bash` calls will stall on prompts. If you see a
-   worker denied on a gate command, this is why — surface it and stop.
+   permissions. The `orchestrate-ralph` skill places `.ralph/settings.json`
+   at `.claude/settings.local.json` before invoking this doctrine — copying
+   it in when absent, erroring out when a differing `settings.local.json` is
+   already there. If that has not happened, worker `Bash` calls will stall on
+   prompts. If you see a worker denied on a gate command, this is why —
+   surface it and stop.
 3. **The env-bootstrap step, if any.** If `docs/agents/ralph.md` defines an
    env-bootstrap step, the gate (step 7) needs it; each worker runs it itself,
    and you run it once in the integration worktree before the first gate.
