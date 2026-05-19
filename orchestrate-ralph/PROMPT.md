@@ -60,6 +60,14 @@ with the project's gate; do not improvise tools outside it. If a command you
 need is genuinely blocked, stop and leave a failure note rather than
 re-shaping the command.
 
+**Git command shape.** You already run inside your own worktree — never prefix
+a command with `cd <path>`. A `cd`-before-`git` command trips a Claude Code
+safety prompt and stalls your unattended run, and cd-ing out of your worktree
+would commit to the wrong tree. Run each `git` and gate command as its own bare
+`Bash` call — no `&&` / `;` chains, no `for` loops, no `$(cat <<EOF…)` here-doc
+substitutions; a compound command is an unrecognised shape that prompts too.
+For a multi-paragraph commit message, pass repeated `-m` flags.
+
 ## Budget
 
 The orchestrator's dispatch prompt gives you a time budget. If you cannot

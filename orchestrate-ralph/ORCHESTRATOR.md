@@ -84,7 +84,10 @@ Beyond those, you *may* run git plumbing that produces little output (`git log
 --oneline`, `git status --short`, `git rev-parse`, `git worktree`, branch
 inspection), `date +%s` for wave timing, and read the config files named above
 and the issue tracker. That is the whole of your direct surface. Use `Read`,
-`Glob`, and `Grep` for files — never `Bash` `cat`/`ls`/`grep`/`find`.
+`Glob`, and `Grep` for files — never `Bash` `cat`/`ls`/`grep`/`find`. Run each
+`Bash` command as its own bare call: never prefix one with `cd` (you are
+already in the integration worktree, and `cd`-before-`git` trips a safety
+prompt), and never chain with `&&` / `;` or a `for` loop.
 
 ## Local git only — never contact a remote
 
