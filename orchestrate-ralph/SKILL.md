@@ -9,6 +9,12 @@ Run the interactive Ralph orchestrator over this repo's issue tracker.
 
 ## Prerequisites — check first, stop if any is missing
 
+Run each check as its own **single bare `Bash` call** — no `&&` / `;` / `|`
+chains, no redirects, no `echo`-labelled bundles. A compound command is a
+distinct pattern the permission matcher does not recognise; it prompts (or,
+unattended, fails) right at the start of the run. For the file-existence
+checks in item 1, prefer `Read` or `Glob` — no `Bash` is needed at all.
+
 1. **`setup-ralph` has been run.** `docs/agents/ralph.md` and
    `.ralph/settings.json` must both exist. If not, tell the user to run
    `setup-ralph` (and `setup-matt-pocock-skills` before it) and stop.

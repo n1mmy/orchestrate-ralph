@@ -117,6 +117,12 @@ rule is stated here so you never even attempt it.
 
 ## Setup prerequisites — check before starting
 
+**Run every check below as its own bare `Bash` call.** The command-shape
+discipline above applies here especially — prerequisite checks are the most
+tempting place to break it. Never bundle them into one `echo`-labelled,
+`&&`-chained, `2>&1`-redirected command: the matcher treats that compound as a
+single unallowlisted pattern, and it prompts at the very start of the run.
+
 1. **You are on a clean, dedicated integration branch.** The branch you are on
    becomes the **integration branch**: workers branch off it, their work merges
    back into it, and when the run ends you hand that branch to the user.
