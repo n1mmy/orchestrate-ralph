@@ -27,9 +27,11 @@ The cost of skipping this is wrong code that has to be redone.
 
 1. **Set up the worktree.** Your worktree was branched off a possibly-stale
    base; the orchestrator's dispatch prompt gives you a `git reset --hard
-   <integration-tip>` to run first. Then, if `docs/agents/ralph.md` defines an
-   env-bootstrap step, perform it — your isolated worktree may lack the
-   gitignored files the gate needs.
+   <integration-tip>` to run first, then a `git rev-parse --show-toplevel` to
+   pin your worktree root. Every file you create or edit must resolve under
+   that root — see "Stay in your worktree". Then, if `docs/agents/ralph.md`
+   defines an env-bootstrap step, perform it — your isolated worktree may lack
+   the gitignored files the gate needs.
 2. **Implement the issue.** Follow its "What to build" literally and satisfy
    every acceptance criterion. Keep scope lean — no abstractions, defensive
    machinery, or features beyond what the issue requires. If the issue seems
@@ -90,6 +92,15 @@ write a file outside your own worktree. (`cd` and `git -C` are denied outright
 in `.ralph/settings.json`; do not try to route around that — committing
 outside your worktree corrupts the run.) Read-only git queries and reading
 shared config are fine.
+
+The escape that bites in practice is subtler than `cd`: a worker constructs a
+path that *resolves* outside its worktree and writes a project file there — an
+absolute path into another checkout, or a `../..` climb past the worktree
+root. `isolation: "worktree"` does not sandbox file writes, so nothing stops
+this but discipline: **address project files only by worktree-relative
+paths.** Never build an absolute path into the repo; never climb above the
+worktree root you pinned in step 1; if you need that root, use the pinned
+value — never recompute it from `$0` or `dirname`.
 
 ## Budget
 

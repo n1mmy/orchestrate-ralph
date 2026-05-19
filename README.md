@@ -49,7 +49,9 @@ Copy or symlink the two skill directories into your skills directory
 ```
 orchestrate-ralph/
 ├── README.md
-├── docs/adr/0001-tracker-agnostic-prose-adapter.md
+├── docs/adr/
+│   ├── 0001-tracker-agnostic-prose-adapter.md
+│   └── 0002-worker-worktree-escapes.md
 ├── setup-ralph/
 │   ├── SKILL.md
 │   └── templates/
