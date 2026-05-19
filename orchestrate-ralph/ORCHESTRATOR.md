@@ -103,10 +103,22 @@ rule is stated here so you never even attempt it.
 
 ## Setup prerequisites — check before starting
 
-1. **You are in a fresh git worktree.** That worktree's branch is the
-   **integration branch**: workers branch off it, their work merges back into
-   it, and when the run ends you hand that branch to the user. If you are in
-   the main checkout, stop and ask.
+1. **You are on a clean, dedicated integration branch.** The branch you are on
+   becomes the **integration branch**: workers branch off it, their work merges
+   back into it, and when the run ends you hand that branch to the user.
+   - It must **not** be the repo's default branch (`main` / `master`) — the
+     loop accumulates `--no-ff` merge commits, and those must never land
+     straight on the trunk. Check against `git symbolic-ref
+     refs/remotes/origin/HEAD` (or the known default).
+   - The working tree must be **clean** (`git status --porcelain` empty) — the
+     revert-and-serialize step (step 7) runs `git reset --hard`, which would
+     destroy any uncommitted work.
+   - Running in a **separate git worktree**, not the repo's primary checkout,
+     is strongly preferred: the loop is long-lived and ties up wherever it
+     runs, and a fresh worktree gives a clean tree and a disposable branch for
+     free. If you are in the primary checkout, stop and ask the user — proceeding
+     in place is acceptable only if the two conditions above hold and the branch
+     is one they are happy to hand back.
 2. **Worker permissions are in place.** Sub-agents inherit this session's
    permissions. The `orchestrate-ralph` skill copies `.ralph/settings.json`
    into `.claude/settings.local.json` before invoking this doctrine; if that
