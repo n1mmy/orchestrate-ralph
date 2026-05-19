@@ -150,9 +150,13 @@ single unallowlisted pattern, and it prompts at the very start of the run.
    placement and runs under that file — that is what carries the worker
    allowlist and the path-guard hook. You, the orchestrator, started *before*
    the placement, so you do not run under it; you operate on the attended
-   session's own permissions. If the placement has not happened, worker `Bash`
-   calls will stall on prompts. If you see a worker denied on a gate command,
-   this is why — surface it and stop.
+   session's own permissions. Workers also run under that file's
+   `permissions.defaultMode` — typically `dontAsk`, which auto-denies any
+   command not on the allow list rather than prompting. That makes the
+   allowlist load-bearing: a missing entry becomes a worker failure, not a
+   stalled prompt. If the placement has not happened, worker `Bash` calls will
+   stall on prompts. If you see a worker denied on a gate or bootstrap
+   command, this is why — surface it and stop.
 3. **The env-bootstrap step, if any.** If `docs/agents/ralph.md` defines an
    env-bootstrap step, the gate (step 7) needs it. Each worker runs it in its
    own worktree; you run it **once, in your own integration worktree, before
