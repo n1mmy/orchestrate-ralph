@@ -9,6 +9,12 @@ Run the interactive Ralph orchestrator over this repo's issue tracker.
 
 ## Prerequisites — check first, stop if any is missing
 
+Run each check as its own **single bare `Bash` call** — no `&&` / `;` / `|`
+chains, no redirects, no `echo`-labelled bundles. A compound command is a
+distinct pattern the permission matcher does not recognise; it prompts (or,
+unattended, fails) right at the start of the run. For the file-existence
+checks in item 1, prefer `Read` or `Glob` — no `Bash` is needed at all.
+
 1. **`setup-ralph` has been run.** `docs/agents/ralph.md` and
    `.ralph/settings.json` must both exist. If not, tell the user to run
    `setup-ralph` (and `setup-matt-pocock-skills` before it) and stop.
@@ -25,19 +31,27 @@ Run the interactive Ralph orchestrator over this repo's issue tracker.
 ## Session setup — worker permissions
 
 Worker sub-agents inherit this session's permissions. `.ralph/settings.json`
-holds the curated worker allowlist and the remote-git `deny` block; the user's
-own `.claude/settings.local.json` deliberately does not. Before starting:
+holds the curated worker allowlist, the remote-git `deny` block, and the
+path-guard hook; the user's own `.claude/settings.local.json` deliberately
+does not. Before starting:
 
-1. If `.claude/settings.local.json` exists, back it up to
-   `.claude/settings.local.json.pre-ralph` — but if that backup already exists
-   (an earlier interrupted run), leave it untouched.
-2. Copy `.ralph/settings.json` to `.claude/settings.local.json`.
-3. When the run ends, on any stop condition: restore the backup if there is
-   one, then remove it.
+1. If `.claude/settings.local.json` does **not** exist, copy
+   `.ralph/settings.json` to it and proceed.
+2. If it exists and is **byte-identical** to `.ralph/settings.json`, an
+   earlier run already placed it — proceed.
+3. If it exists and **differs** from `.ralph/settings.json`, **stop with an
+   error.** A pre-existing `.claude/settings.local.json` is the user's own
+   allow/deny list, accumulated from interactive use — it is valuable, not
+   stale, and the loop must never overwrite, swap, or back it up. The loop
+   simply must not run in a checkout that holds one. Tell the user to run in
+   a fresh worktree — the recommended location anyway, and one with no
+   `settings.local.json` to endanger. **Do not suggest they delete the
+   file**; treating their interactive settings as disposable scaffolding is
+   the mistake this rule exists to prevent.
 
-In a fresh worktree there is usually no `.claude/settings.local.json` to back
-up (it is gitignored and not checked out), so this is mostly a no-op safety
-net for the main-checkout case.
+The loop does not restore or remove `.claude/settings.local.json` when it
+ends: the run happens in a disposable worktree, the file is gitignored, and
+the worktree is thrown away afterwards. Leaving it in place is correct.
 
 ## Run the loop
 

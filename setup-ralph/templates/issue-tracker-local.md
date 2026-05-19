@@ -5,7 +5,8 @@ tracker. This section tells it how.
 
 - **Discover** — issues are files at `<feature-dir>/<NN>-<slug>.md`. A wave
   candidate is any file whose `Status:` line reads `ready-for-agent`. Find
-  them with `Glob` / `Grep`, not a shell `cat`/`find` loop.
+  them with the `Glob` / `Grep` tools, or — if your harness lacks them —
+  `rg` / `find` as single bare `Bash` commands. Not a `cat`/`find` loop.
 - **Read** — the issue is the whole file, including any notes under a
   `## Comments` heading from prior attempts.
 - **Dependencies** — an optional `Blocked by:` line near the top of the file

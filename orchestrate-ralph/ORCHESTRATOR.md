@@ -94,8 +94,13 @@ isolates every sub-agent and so neither can be delegated:
 Beyond those, you *may* run git plumbing that produces little output (`git log
 --oneline`, `git status --short`, `git rev-parse`, `git worktree`, branch
 inspection), `date +%s` for wave timing, and read the config files named above
-and the issue tracker. That is the whole of your direct surface. Use `Read`,
-`Glob`, and `Grep` for files — never `Bash` `cat`/`ls`/`grep`/`find`. Run each
+and the issue tracker — always from your own integration worktree, or from a
+branch via `git show <ref>:<path>`, **never from inside a worker's worktree
+directory** (`.../agent-*/`). That is the whole of your direct surface. Prefer `Read`
+for file contents and the `Glob` / `Grep` tools for search — but native
+macOS/Linux Claude Code builds drop `Glob` / `Grep`, so if they are absent
+fall back to the allowlisted `rg` / `grep` / `find` (or `bfs` / `ugrep`) in
+`Bash`. Run each
 `Bash` command as its own bare call: never prefix one with `cd` (you are
 already in the integration worktree, and `cd`-before-`git` trips a safety
 prompt), never run a command by full path, and never use a compound shape —
@@ -109,10 +114,18 @@ This loop works the local checkout exclusively. Neither you nor any sub-agent
 runs `git push`, `git fetch`, `git pull`, `git clone`, or `git ls-remote` —
 nothing that reaches a remote. Workers commit to their local branches; you
 merge locally; the finished integration branch is left on disk for the user to
-push. This is enforced by the `deny` entries in `.ralph/settings.json`; the
-rule is stated here so you never even attempt it.
+push. For workers this is enforced by the `deny` entries in
+`.ralph/settings.json`; for you it is **doctrine only** — you run on the
+attended session's permissions, not that file — so the rule is stated here and
+you simply never attempt it.
 
 ## Setup prerequisites — check before starting
+
+**Run every check below as its own bare `Bash` call.** The command-shape
+discipline above applies here especially — prerequisite checks are the most
+tempting place to break it. Never bundle them into one `echo`-labelled,
+`&&`-chained, `2>&1`-redirected command: the matcher treats that compound as a
+single unallowlisted pattern, and it prompts at the very start of the run.
 
 1. **You are on a clean, dedicated integration branch.** The branch you are on
    becomes the **integration branch**: workers branch off it, their work merges
@@ -130,14 +143,24 @@ rule is stated here so you never even attempt it.
      free. If you are in the primary checkout, stop and ask the user — proceeding
      in place is acceptable only if the two conditions above hold and the branch
      is one they are happy to hand back.
-2. **Worker permissions are in place.** Sub-agents inherit this session's
-   permissions. The `orchestrate-ralph` skill copies `.ralph/settings.json`
-   into `.claude/settings.local.json` before invoking this doctrine; if that
-   has not happened, worker `Bash` calls will stall on prompts. If you see a
-   worker denied on a gate command, this is why — surface it and stop.
+2. **Worker permissions are in place.** The `orchestrate-ralph` skill places
+   `.ralph/settings.json` at `.claude/settings.local.json` before invoking
+   this doctrine — copying it in when absent, erroring out when a differing
+   `settings.local.json` is already there. Each worker is spawned *after* that
+   placement and runs under that file — that is what carries the worker
+   allowlist and the path-guard hook. You, the orchestrator, started *before*
+   the placement, so you do not run under it; you operate on the attended
+   session's own permissions. If the placement has not happened, worker `Bash`
+   calls will stall on prompts. If you see a worker denied on a gate command,
+   this is why — surface it and stop.
 3. **The env-bootstrap step, if any.** If `docs/agents/ralph.md` defines an
-   env-bootstrap step, the gate (step 7) needs it; each worker runs it itself,
-   and you run it once in the integration worktree before the first gate.
+   env-bootstrap step, the gate (step 7) needs it. Each worker runs it in its
+   own worktree; you run it **once, in your own integration worktree, before
+   the first gate**. Run it as the **literal command from `ralph.md`** —
+   worktree-relative, exactly as written. Never reconstruct it with absolute
+   paths, and never run it (or any command) inside a worker's worktree
+   directory (`.../agent-*/`): a worker bootstraps its own worktree, and you
+   do not prepare or patch one for it.
 
 ## Configuration
 
@@ -263,10 +286,14 @@ two ways:
 Then, for each worker:
 
 - Read its result — but **do not trust the self-report**. Verify the durable
-  artifacts: the issue actually transitioned to `done`, and a commit actually
-  landed on **the worker's own branch**. A worker that reports success but left
-  the issue at `ready-for-agent`, or whose own branch carries no new commit, is
-  a **failure** (step 6), not a success.
+  artifacts on **the worker's own branch**, with `git` run from your own
+  worktree — **never by reading files inside the worker's worktree directory**
+  (`.../agent-*/`). That directory is the worker's, and you reap it below; the
+  branch is the durable artifact, and `git` reads it from anywhere. Confirm a
+  commit landed (`git log <worker-branch>`), and read the issue's transitioned
+  `Status:` from that branch (`git show <worker-branch>:<issue-file>`). A
+  worker that reports success but left the issue at `ready-for-agent`, or whose
+  own branch carries no new commit, is a **failure** (step 6), not a success.
 - If verified, **merge it yourself**: `git merge --no-ff <worker-branch>` into
   the integration branch (see the merge procedure below).
   - Clean merge → the branch is integrated. **Reap the worker's worktree** so
@@ -314,7 +341,8 @@ addressed to the **worker**, not to you. It means that one worker hit a blocked
 command and stopped; it is an ordinary **Failure**. Do **not** halt. Merge the
 workers that succeeded, write the failed worker's note yourself, retry its
 issue. If a denial *does* halt you anyway, step 1 recovers the wave on
-re-entry.
+re-entry. Either way, **record the exact blocked command string** from the
+rejection — a config-shaped halt summary quotes it (see "Stop conditions").
 
 **Retry budget** — an issue carrying `RETRY_BUDGET + 1` failure notes is
 exhausted: transition it to `needs-info`, escalate it (step 8), and count it
@@ -390,6 +418,15 @@ On any halt, and at end-of-run, print a summary: issues done, issues
 left for the user to merge up and push via the project's git workflow — **you
 do not push, and you do not merge outside your worktree.**
 
+When the stop reason is **config-shaped** — a write-guard hook inactive, a
+wave that failed systemically on a blocked command, or workers denied on a
+gate or bootstrap command — the summary must also (a) recommend the user run
+`/setup-ralph` with a one-line description of the symptom, and (b) quote the
+exact denied command string(s) verbatim, so the repair run starts from ground
+truth rather than a vague report. Do **not** recommend `/setup-ralph` for a
+code-shaped failure (a red gate from a real cross-issue break, exhausted
+retries on genuine bugs) — `setup-ralph` repairs configuration, not code.
+
 ## Dispatch template and integration procedures
 
 ### Worker sub-agent
@@ -457,8 +494,10 @@ output, safe for the orchestrator's context.
 
 In the integration worktree, on the integration branch, after all of the
 wave's merges have run. First perform the env-bootstrap step from
-`docs/agents/ralph.md`, if any. Then run, as separate bare commands, each
-command in the gate from `docs/agents/ralph.md`, in order.
+`docs/agents/ralph.md`, if any — the **literal command, worktree-relative**,
+run in this integration worktree, never with reconstructed absolute paths.
+Then run, as separate bare commands, each command in the gate from
+`docs/agents/ralph.md`, in order.
 
 Read only pass/fail and (on red) the first failure. Do not fix anything; do not
 commit. Green → next round; red → revert-and-serialize (step 7).

@@ -14,9 +14,11 @@ There is deliberately no headless driver (see [ADR 0001](docs/adr/0001-tracker-a
 
 Two skills:
 
-- **`setup-ralph/`** — one-time, per-repo scaffolding. Autodetects the
+- **`setup-ralph/`** — per-repo configuration. A fresh run autodetects the
   project's verification gate, gathers the orchestrator's config, and writes
-  `docs/agents/ralph.md` and `.ralph/settings.json`. Run it once per repo.
+  `docs/agents/ralph.md` and `.ralph/settings.json`. A later run *repairs* an
+  existing config from a complaint ("workers keep prompting for permissions")
+  instead of re-scaffolding.
 - **`orchestrate-ralph/`** — runs the loop. Reads `ORCHESTRATOR.md`, becomes
   the orchestrator, and dispatches workers until the queue is drained. Also
   carries `PROMPT.md` (worker doctrine) and `watch-steps.py` (a terminal step
@@ -51,9 +53,11 @@ orchestrate-ralph/
 ├── README.md
 ├── docs/adr/
 │   ├── 0001-tracker-agnostic-prose-adapter.md
-│   └── 0002-worker-worktree-escapes.md
+│   ├── 0002-worker-worktree-escapes.md
+│   └── 0003-setup-ralph-repair-mode.md
 ├── setup-ralph/
 │   ├── SKILL.md
+│   ├── repair-symptoms.md
 │   └── templates/
 │       ├── settings.template.json
 │       ├── hook-path-guard.py
