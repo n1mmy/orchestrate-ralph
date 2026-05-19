@@ -91,6 +91,12 @@ call to a single bare command:
   `grep`, `find`, or `bfs`, and read or list with `cat`, `head`, `tail`, `ls`
   — one bare command each, never a redirect. `Read` for file contents is
   always available; prefer it.
+- **Root every search inside your worktree** — a relative path or `.`, never
+  `/`, `~`, or an absolute path that climbs out. Scanning the whole filesystem
+  (`find / …`) is never right: it is slow, may hang you past your budget, and
+  reaches outside your worktree. A module, file, or dependency that seems
+  missing is a gate or env-bootstrap failure to note (step 6) — not something
+  to hunt for across the disk.
 - **Removing and creating files.** No bare `rm` or `mkdir`. To **remove** a
   file, use `git`: `git rm <path>` for a tracked file, `git clean -f <path>`
   for an untracked one — a stray file you created by mistake (add `-x` only if

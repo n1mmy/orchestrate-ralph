@@ -65,11 +65,16 @@ Walk the user through these one at a time — present, get an answer, move on:
   filled in with the answers from step 2.
 - **`.ralph/settings.json`** — from
   [templates/settings.template.json](./templates/settings.template.json), with
-  one allow entry per distinct gate command. The entry is the **whole gate
-  command** as a `:*` prefix — `Bash(pnpm typecheck:*)`, `Bash(bash check.sh:*)`
-  — never just its first token. `Bash(bash *)` or `Bash(pnpm *)` would let a
-  worker run `bash -c '<anything>'` or `pnpm dlx <anything>`: arbitrary code,
-  not the gate. Show the user the final file before writing.
+  one allow entry per distinct gate command **and one for the env-bootstrap
+  command** (step 2), if there is one — every worker runs that bootstrap in
+  its own worktree under this allowlist, so it needs an entry just like a gate
+  command. (The orchestrator also runs the bootstrap, but in its own attended
+  session, where an unlisted command merely prompts the watching user.) Each
+  entry is the **whole command** as a `:*` prefix — `Bash(pnpm typecheck:*)`,
+  `Bash(bash check.sh:*)`, `Bash(cp .env.example .env:*)` — never just its
+  first token. `Bash(bash *)` or `Bash(pnpm *)` would let a worker run
+  `bash -c '<anything>'` or `pnpm dlx <anything>`: arbitrary code, not the
+  gate. Show the user the final file before writing.
 - **`.ralph/hook-path-guard.py`** — copy
   [templates/hook-path-guard.py](./templates/hook-path-guard.py) verbatim. It
   is the `PreToolUse` path-guard hook that `.ralph/settings.json` references —

@@ -114,8 +114,10 @@ This loop works the local checkout exclusively. Neither you nor any sub-agent
 runs `git push`, `git fetch`, `git pull`, `git clone`, or `git ls-remote` —
 nothing that reaches a remote. Workers commit to their local branches; you
 merge locally; the finished integration branch is left on disk for the user to
-push. This is enforced by the `deny` entries in `.ralph/settings.json`; the
-rule is stated here so you never even attempt it.
+push. For workers this is enforced by the `deny` entries in
+`.ralph/settings.json`; for you it is **doctrine only** — you run on the
+attended session's permissions, not that file — so the rule is stated here and
+you simply never attempt it.
 
 ## Setup prerequisites — check before starting
 
@@ -141,16 +143,24 @@ single unallowlisted pattern, and it prompts at the very start of the run.
      free. If you are in the primary checkout, stop and ask the user — proceeding
      in place is acceptable only if the two conditions above hold and the branch
      is one they are happy to hand back.
-2. **Worker permissions are in place.** Sub-agents inherit this session's
-   permissions. The `orchestrate-ralph` skill places `.ralph/settings.json`
-   at `.claude/settings.local.json` before invoking this doctrine — copying
-   it in when absent, erroring out when a differing `settings.local.json` is
-   already there. If that has not happened, worker `Bash` calls will stall on
-   prompts. If you see a worker denied on a gate command, this is why —
-   surface it and stop.
+2. **Worker permissions are in place.** The `orchestrate-ralph` skill places
+   `.ralph/settings.json` at `.claude/settings.local.json` before invoking
+   this doctrine — copying it in when absent, erroring out when a differing
+   `settings.local.json` is already there. Each worker is spawned *after* that
+   placement and runs under that file — that is what carries the worker
+   allowlist and the path-guard hook. You, the orchestrator, started *before*
+   the placement, so you do not run under it; you operate on the attended
+   session's own permissions. If the placement has not happened, worker `Bash`
+   calls will stall on prompts. If you see a worker denied on a gate command,
+   this is why — surface it and stop.
 3. **The env-bootstrap step, if any.** If `docs/agents/ralph.md` defines an
-   env-bootstrap step, the gate (step 7) needs it; each worker runs it itself,
-   and you run it once in the integration worktree before the first gate.
+   env-bootstrap step, the gate (step 7) needs it. Each worker runs it in its
+   own worktree; you run it **once, in your own integration worktree, before
+   the first gate**. Run it as the **literal command from `ralph.md`** —
+   worktree-relative, exactly as written. Never reconstruct it with absolute
+   paths, and never run it (or any command) inside a worker's worktree
+   directory (`.../agent-*/`): a worker bootstraps its own worktree, and you
+   do not prepare or patch one for it.
 
 ## Configuration
 
@@ -484,8 +494,10 @@ output, safe for the orchestrator's context.
 
 In the integration worktree, on the integration branch, after all of the
 wave's merges have run. First perform the env-bootstrap step from
-`docs/agents/ralph.md`, if any. Then run, as separate bare commands, each
-command in the gate from `docs/agents/ralph.md`, in order.
+`docs/agents/ralph.md`, if any — the **literal command, worktree-relative**,
+run in this integration worktree, never with reconstructed absolute paths.
+Then run, as separate bare commands, each command in the gate from
+`docs/agents/ralph.md`, in order.
 
 Read only pass/fail and (on red) the first failure. Do not fix anything; do not
 commit. Green → next round; red → revert-and-serialize (step 7).
