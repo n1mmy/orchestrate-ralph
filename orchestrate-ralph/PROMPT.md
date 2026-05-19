@@ -60,8 +60,9 @@ The cost of skipping this is wrong code that has to be redone.
 ## Tooling discipline
 
 Follow the repo's own agent-instruction file first. Absent guidance there, the
-defaults: file contents via `Read`, edits via `Edit` / `Write`, search via
-`Glob` / `Grep` (or `rg`). **No remote git** — never push, fetch, or pull; the
+defaults: file contents via `Read`, edits via `Edit` / `Write`, search via the
+`Glob` / `Grep` tools when your harness has them, else `rg` / `grep` / `find`
+in Bash (see "Bash command shape"). **No remote git** — never push, fetch, or pull; the
 loop works the local checkout only, and pushing is the user's job. Verify only
 with the project's gate; do not improvise tools outside it. If a command you
 need is genuinely blocked, stop and leave a failure note rather than
@@ -83,10 +84,15 @@ call to a single bare command:
   additionally trips a safety prompt.
 - **Run commands bare, not by full path.** `git`, `pnpm`, `node` — not
   `/usr/bin/git`; an explicit path is a different, unrecognised shape.
-- **`cat` / `ls` / `head` / `tail` prompt where the dedicated tool would
-  not** — use `Read` for file contents, `Glob` / `Grep` for search. No bare
-  `rm` or `mkdir`: use `git rm` for tracked files, `Write` to overwrite, and
-  `Write` to a path inside a missing directory to create the parent.
+- **`Glob` / `Grep` may not exist; the Bash equivalents always do.** Native
+  macOS and Linux builds of Claude Code drop the `Glob` / `Grep` tools in
+  favour of Bash search — do not assume they are present. Use them if your
+  harness offers them; otherwise search with the allowlisted `rg`, `ugrep`,
+  `grep`, `find`, or `bfs`, and read or list with `cat`, `head`, `tail`, `ls`
+  — one bare command each, never a redirect. `Read` for file contents is
+  always available; prefer it. No bare `rm` or `mkdir`: use `git rm` for
+  tracked files, `Write` to overwrite, and `Write` to a path inside a missing
+  directory to create the parent.
 
 **Stay in your worktree.** You run in an isolated worktree; `git worktree list`
 will also show the orchestrator's checkout and other parallel workers'
