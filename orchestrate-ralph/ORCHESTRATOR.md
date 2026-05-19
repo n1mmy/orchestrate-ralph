@@ -94,7 +94,9 @@ isolates every sub-agent and so neither can be delegated:
 Beyond those, you *may* run git plumbing that produces little output (`git log
 --oneline`, `git status --short`, `git rev-parse`, `git worktree`, branch
 inspection), `date +%s` for wave timing, and read the config files named above
-and the issue tracker. That is the whole of your direct surface. Prefer `Read`
+and the issue tracker — always from your own integration worktree, or from a
+branch via `git show <ref>:<path>`, **never from inside a worker's worktree
+directory** (`.../agent-*/`). That is the whole of your direct surface. Prefer `Read`
 for file contents and the `Glob` / `Grep` tools for search — but native
 macOS/Linux Claude Code builds drop `Glob` / `Grep`, so if they are absent
 fall back to the allowlisted `rg` / `grep` / `find` (or `bfs` / `ugrep`) in
@@ -274,10 +276,14 @@ two ways:
 Then, for each worker:
 
 - Read its result — but **do not trust the self-report**. Verify the durable
-  artifacts: the issue actually transitioned to `done`, and a commit actually
-  landed on **the worker's own branch**. A worker that reports success but left
-  the issue at `ready-for-agent`, or whose own branch carries no new commit, is
-  a **failure** (step 6), not a success.
+  artifacts on **the worker's own branch**, with `git` run from your own
+  worktree — **never by reading files inside the worker's worktree directory**
+  (`.../agent-*/`). That directory is the worker's, and you reap it below; the
+  branch is the durable artifact, and `git` reads it from anywhere. Confirm a
+  commit landed (`git log <worker-branch>`), and read the issue's transitioned
+  `Status:` from that branch (`git show <worker-branch>:<issue-file>`). A
+  worker that reports success but left the issue at `ready-for-agent`, or whose
+  own branch carries no new commit, is a **failure** (step 6), not a success.
 - If verified, **merge it yourself**: `git merge --no-ff <worker-branch>` into
   the integration branch (see the merge procedure below).
   - Clean merge → the branch is integrated. **Reap the worker's worktree** so
