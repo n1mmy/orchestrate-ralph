@@ -6,14 +6,14 @@
       "Edit",
       "Glob",
       "Grep",
-      "Bash(git *)",
-      "Bash(rg *)",
-      "Bash(grep *)",
-      "Bash(find *)",
-      "Bash(command -v *)",
-      "Bash(which *)",
-      "Bash(test *)",
-      "Bash(echo *)",
+      "Bash(git:*)",
+      "Bash(rg:*)",
+      "Bash(grep:*)",
+      "Bash(find:*)",
+      "Bash(command -v:*)",
+      "Bash(which:*)",
+      "Bash(test:*)",
+      "Bash(echo:*)",
       "Bash(date +%s)"
     ],
     "deny": [
@@ -22,7 +22,22 @@
       "Bash(git pull:*)",
       "Bash(git clone:*)",
       "Bash(git ls-remote:*)",
-      "Bash(git remote:*)"
+      "Bash(git remote:*)",
+      "Bash(cd:*)",
+      "Bash(git -C:*)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.ralph/hook-path-guard.py\""
+          }
+        ]
+      }
     ]
   }
 }

@@ -27,9 +27,16 @@ The cost of skipping this is wrong code that has to be redone.
 
 1. **Set up the worktree.** Your worktree was branched off a possibly-stale
    base; the orchestrator's dispatch prompt gives you a `git reset --hard
-   <integration-tip>` to run first. Then, if `docs/agents/ralph.md` defines an
-   env-bootstrap step, perform it — your isolated worktree may lack the
-   gitignored files the gate needs.
+   <integration-tip>` to run first, then a `git rev-parse --show-toplevel` to
+   pin your worktree root. Every file you create or edit must resolve under
+   that root — see "Stay in your worktree". The dispatch prompt also has you
+   **self-test the path-guard hook** — attempt the probe `Write` it specifies
+   (a path outside your worktree); the hook must reject it. If that write
+   instead *succeeds*, the hook is not protecting you: stop immediately, report
+   outcome `failed` with reason "path-guard hook inactive", and do not touch
+   the issue. Then, if `docs/agents/ralph.md` defines an env-bootstrap step,
+   perform it — your isolated worktree may lack the gitignored files the gate
+   needs.
 2. **Implement the issue.** Follow its "What to build" literally and satisfy
    every acceptance criterion. Keep scope lean — no abstractions, defensive
    machinery, or features beyond what the issue requires. If the issue seems
@@ -59,6 +66,46 @@ loop works the local checkout only, and pushing is the user's job. Verify only
 with the project's gate; do not improvise tools outside it. If a command you
 need is genuinely blocked, stop and leave a failure note rather than
 re-shaping the command.
+
+**Bash command shape.** Bash calls go through a permission matcher that
+allowlists *specific command shapes*. It treats a compound expression as a
+distinct pattern from its parts, so a compound prompts — and in an unattended
+run, **fails** — even when every piece is individually allowlisted. Keep every
+call to a single bare command:
+
+- **One command per `Bash` call.** No `&&` / `||` / `;` chains, no pipes (`|`),
+  no subshells, no redirects (`>`, `>>`, `<`, `2>&1`), no `for` loops, no
+  `$(cat <<EOF…)` here-doc substitutions. Split work into separate `Bash` tool
+  uses. Don't pipe gate or test output through `tail` / `head` — run the bare
+  command. For a multi-paragraph commit message, pass repeated `-m` flags.
+- **Never prefix with `cd`.** You already run in your worktree; commands
+  resolve from its root. `cd <path> && …` is a compound, and `cd`-before-`git`
+  additionally trips a safety prompt.
+- **Run commands bare, not by full path.** `git`, `pnpm`, `node` — not
+  `/usr/bin/git`; an explicit path is a different, unrecognised shape.
+- **`cat` / `ls` / `head` / `tail` prompt where the dedicated tool would
+  not** — use `Read` for file contents, `Glob` / `Grep` for search. No bare
+  `rm` or `mkdir`: use `git rm` for tracked files, `Write` to overwrite, and
+  `Write` to a path inside a missing directory to create the parent.
+
+**Stay in your worktree.** You run in an isolated worktree; `git worktree list`
+will also show the orchestrator's checkout and other parallel workers'
+worktrees. Every path it lists except your own is off-limits — they hold the
+orchestrator's integration branch and other workers' in-progress work. Never
+`cd` into one, never target one with `git -C` or `--work-tree`, never edit or
+write a file outside your own worktree. (`cd` and `git -C` are denied outright
+in `.ralph/settings.json`; do not try to route around that — committing
+outside your worktree corrupts the run.) Read-only git queries and reading
+shared config are fine.
+
+The escape that bites in practice is subtler than `cd`: a worker constructs a
+path that *resolves* outside its worktree and writes a project file there — an
+absolute path into another checkout, or a `../..` climb past the worktree
+root. `isolation: "worktree"` does not sandbox file writes, so nothing stops
+this but discipline: **address project files only by worktree-relative
+paths.** Never build an absolute path into the repo; never climb above the
+worktree root you pinned in step 1; if you need that root, use the pinned
+value — never recompute it from `$0` or `dirname`.
 
 ## Budget
 

@@ -18,10 +18,6 @@ each wave. Every command must exit zero. Order matters — cheap checks first.
 <gate command 4, e.g. pnpm build>
 ```
 
-## Integration base branch
-
-`main`
-
 ## Env bootstrap
 
 None.
