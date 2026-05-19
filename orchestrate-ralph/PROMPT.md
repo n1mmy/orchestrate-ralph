@@ -60,13 +60,32 @@ with the project's gate; do not improvise tools outside it. If a command you
 need is genuinely blocked, stop and leave a failure note rather than
 re-shaping the command.
 
-**Git command shape.** You already run inside your own worktree — never prefix
-a command with `cd <path>`. A `cd`-before-`git` command trips a Claude Code
-safety prompt and stalls your unattended run, and cd-ing out of your worktree
-would commit to the wrong tree. Run each `git` and gate command as its own bare
-`Bash` call — no `&&` / `;` chains, no `for` loops, no `$(cat <<EOF…)` here-doc
-substitutions; a compound command is an unrecognised shape that prompts too.
-For a multi-paragraph commit message, pass repeated `-m` flags.
+**Bash command shape.** Bash calls go through a permission matcher that
+allowlists *specific command shapes*. It treats a compound expression as a
+distinct pattern from its parts, so a compound prompts — and in an unattended
+run, **fails** — even when every piece is individually allowlisted. Keep every
+call to a single bare command:
+
+- **One command per `Bash` call.** No `&&` / `||` / `;` chains, no pipes (`|`),
+  no subshells, no redirects (`>`, `>>`, `<`, `2>&1`), no `for` loops, no
+  `$(cat <<EOF…)` here-doc substitutions. Split work into separate `Bash` tool
+  uses. Don't pipe gate or test output through `tail` / `head` — run the bare
+  command. For a multi-paragraph commit message, pass repeated `-m` flags.
+- **Never prefix with `cd`.** You already run in your worktree; commands
+  resolve from its root. `cd <path> && …` is a compound, and `cd`-before-`git`
+  additionally trips a safety prompt.
+- **Run commands bare, not by full path.** `git`, `pnpm`, `node` — not
+  `/usr/bin/git`; an explicit path is a different, unrecognised shape.
+- **`cat` / `ls` / `head` / `tail` prompt where the dedicated tool would
+  not** — use `Read` for file contents, `Glob` / `Grep` for search. No bare
+  `rm` or `mkdir`: use `git rm` for tracked files, `Write` to overwrite, and
+  `Write` to a path inside a missing directory to create the parent.
+
+**Stay in your worktree.** You run in an isolated worktree; sibling worktrees
+hold *other parallel workers'* in-progress work. Never edit, write, or run a
+mutating command against any path outside your worktree — cd-ing out would also
+commit to the wrong tree. Read-only git queries and reading shared config are
+fine.
 
 ## Budget
 

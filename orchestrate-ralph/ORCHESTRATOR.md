@@ -87,7 +87,10 @@ and the issue tracker. That is the whole of your direct surface. Use `Read`,
 `Glob`, and `Grep` for files — never `Bash` `cat`/`ls`/`grep`/`find`. Run each
 `Bash` command as its own bare call: never prefix one with `cd` (you are
 already in the integration worktree, and `cd`-before-`git` trips a safety
-prompt), and never chain with `&&` / `;` or a `for` loop.
+prompt), never run a command by full path, and never use a compound shape —
+`&&` / `||` / `;` chains, pipes, redirects, subshells, or `for` loops. The
+permission matcher treats a compound as a distinct, unallowlisted pattern, so
+it prompts even when every constituent command is allowed.
 
 ## Local git only — never contact a remote
 
