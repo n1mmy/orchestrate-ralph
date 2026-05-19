@@ -81,11 +81,15 @@ call to a single bare command:
   `rm` or `mkdir`: use `git rm` for tracked files, `Write` to overwrite, and
   `Write` to a path inside a missing directory to create the parent.
 
-**Stay in your worktree.** You run in an isolated worktree; sibling worktrees
-hold *other parallel workers'* in-progress work. Never edit, write, or run a
-mutating command against any path outside your worktree — cd-ing out would also
-commit to the wrong tree. Read-only git queries and reading shared config are
-fine.
+**Stay in your worktree.** You run in an isolated worktree; `git worktree list`
+will also show the orchestrator's checkout and other parallel workers'
+worktrees. Every path it lists except your own is off-limits — they hold the
+orchestrator's integration branch and other workers' in-progress work. Never
+`cd` into one, never target one with `git -C` or `--work-tree`, never edit or
+write a file outside your own worktree. (`cd` and `git -C` are denied outright
+in `.ralph/settings.json`; do not try to route around that — committing
+outside your worktree corrupts the run.) Read-only git queries and reading
+shared config are fine.
 
 ## Budget
 

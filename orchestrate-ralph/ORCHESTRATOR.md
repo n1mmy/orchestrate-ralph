@@ -225,12 +225,23 @@ corrupt the integration branch — its work is isolated in its own worktree.
 ### 5 — Collect and merge
 
 When the wave's dispatch message returns, all workers have resolved together.
+
+First, **confirm the integration branch has not moved**: its current tip must
+equal the pre-wave tip recorded in step 2. You have run no merge yet this wave,
+and a correctly-isolated worker only ever commits to its own branch — so the
+integration tip *cannot* have advanced on its own. If it has, a worker escaped
+its worktree and committed onto the integration branch directly: halt on a
+**worktree-isolation breach** (see stop conditions) rather than merging on top
+of an untrusted tip.
+
 Then, for each worker:
 
 - Read its result — but **do not trust the self-report**. Verify the durable
   artifacts: the issue actually transitioned to `done`, and a commit actually
-  landed on the worker's branch. A worker that reports success but left the
-  issue at `ready-for-agent` is a **failure** (step 6), not a success.
+  landed on **the worker's own branch**. A worker that reports success but left
+  the issue at `ready-for-agent` is a **failure** (step 6), not a success — and
+  a worker whose own branch carries no new commit is also a failure, and likely
+  escaped its worktree (note that in step 6).
 - If verified, **merge it yourself**: `git merge --no-ff <worker-branch>` into
   the integration branch (see the merge procedure below).
   - Clean merge → the branch is integrated. **Reap the worker's worktree** so
@@ -251,12 +262,15 @@ Then, for each worker:
 A worker outcome is one of:
 
 - **Success** (verified in step 5) → done with this issue.
-- **Failure** (gate red, crash, out-of-time, permission-denied, or unverified
-  self-report) → a terse failure note belongs on the issue (per the tracker's
-  comment step), and the issue stays `ready-for-agent`. A graceful worker
-  writes that note itself; on a hard crash, an out-of-time worker, or a
-  permission-denied worker, *you* write a one-line note ("attempt N: timed
-  out"). Next round a **fresh** worker picks the issue up and reads it
+- **Failure** (gate red, crash, out-of-time, permission-denied, worktree
+  escape, or unverified self-report) → a terse failure note belongs on the
+  issue (per the tracker's comment step), and the issue stays
+  `ready-for-agent`. A graceful worker writes that note itself; on a hard
+  crash, an out-of-time worker, or a permission-denied worker, *you* write a
+  one-line note ("attempt N: timed out"). If the worker returned but its own
+  branch carries no commit, note "attempt N: no commit on branch — possible
+  worktree escape, check other worktrees for stray commits" so the user can
+  investigate. Next round a **fresh** worker picks the issue up and reads it
   *including* the prior notes — a clean-context retry that can still see what
   the last attempt hit.
 - **`needs-info`** (the worker explicitly judged the issue wrong or blocked) →
@@ -330,6 +344,9 @@ Halt the loop when any of these hold:
   waves.
 - **No eligible issues** — `ready-for-agent` issues remain but all are blocked
   (a dependency cycle or a stuck dependency).
+- **Worktree-isolation breach** — the integration tip moved before any merge
+  ran this wave (step 5). A worker escaped its worktree; the branch state is no
+  longer trustworthy. Halt and surface it for the user to inspect.
 
 On any halt, and at end-of-run, print a summary: issues done, issues
 `needs-info` (with reasons), waves run, stop reason. The integration branch is

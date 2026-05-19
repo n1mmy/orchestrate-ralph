@@ -22,7 +22,9 @@
       "Bash(git pull:*)",
       "Bash(git clone:*)",
       "Bash(git ls-remote:*)",
-      "Bash(git remote:*)"
+      "Bash(git remote:*)",
+      "Bash(cd:*)",
+      "Bash(git -C:*)"
     ]
   }
 }
