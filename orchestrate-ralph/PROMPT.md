@@ -90,9 +90,14 @@ call to a single bare command:
   harness offers them; otherwise search with the allowlisted `rg`, `ugrep`,
   `grep`, `find`, or `bfs`, and read or list with `cat`, `head`, `tail`, `ls`
   — one bare command each, never a redirect. `Read` for file contents is
-  always available; prefer it. No bare `rm` or `mkdir`: use `git rm` for
-  tracked files, `Write` to overwrite, and `Write` to a path inside a missing
-  directory to create the parent.
+  always available; prefer it.
+- **Removing and creating files.** No bare `rm` or `mkdir`. To **remove** a
+  file, use `git`: `git rm <path>` for a tracked file, `git clean -f <path>`
+  for an untracked one — a stray file you created by mistake (add `-x` only if
+  it is gitignored). Both are allowlisted and both stay inside your worktree;
+  scope `git clean` to the specific path, never run it bare. To **create** a
+  directory, `Write` a file to a path inside it — the parent is made for you.
+  `Write` overwrites a file's contents; it cannot delete a file.
 
 **Stay in your worktree.** You run in an isolated worktree; `git worktree list`
 will also show the orchestrator's checkout and other parallel workers'
