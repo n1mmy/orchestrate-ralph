@@ -22,6 +22,15 @@ import sys
 
 GUARDED = {"Write", "Edit", "NotebookEdit"}
 
+# Extra absolute paths a worker may write to, beyond its own worktree. Empty by
+# default. Add a directory here — e.g. "/data/shared" — to let workers write a
+# shared location the worktree boundary would otherwise deny. This list is the
+# ONLY part of this file meant to be edited; the guard logic below is not.
+# `setup-ralph` repair mode edits this list. Each entry is matched with the
+# same boundary care as the worktree root: the path itself, or a child under
+# it — never a bare prefix.
+EXTRA_ALLOWED_ROOTS = []
+
 
 def deny(reason):
     json.dump({
@@ -68,8 +77,12 @@ def main():
     real_target = os.path.realpath(abs_target)
     real_root = os.path.realpath(root)
 
-    if real_target == real_root or real_target.startswith(real_root + os.sep):
-        sys.exit(0)
+    # The worktree root is the boundary; EXTRA_ALLOWED_ROOTS widens it. Every
+    # allowed root is matched the same way — the path itself or a child under
+    # it (the `+ os.sep` stops `/data/shared` matching `/data/shared-evil`).
+    for allowed in [real_root] + [os.path.realpath(p) for p in EXTRA_ALLOWED_ROOTS]:
+        if real_target == allowed or real_target.startswith(allowed + os.sep):
+            sys.exit(0)
 
     deny(
         f"Path-guard: {event['tool_name']} targets {real_target}, outside this "

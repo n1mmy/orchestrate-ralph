@@ -319,7 +319,8 @@ addressed to the **worker**, not to you. It means that one worker hit a blocked
 command and stopped; it is an ordinary **Failure**. Do **not** halt. Merge the
 workers that succeeded, write the failed worker's note yourself, retry its
 issue. If a denial *does* halt you anyway, step 1 recovers the wave on
-re-entry.
+re-entry. Either way, **record the exact blocked command string** from the
+rejection — a config-shaped halt summary quotes it (see "Stop conditions").
 
 **Retry budget** — an issue carrying `RETRY_BUDGET + 1` failure notes is
 exhausted: transition it to `needs-info`, escalate it (step 8), and count it
@@ -394,6 +395,15 @@ On any halt, and at end-of-run, print a summary: issues done, issues
 `needs-info` (with reasons), waves run, stop reason. The integration branch is
 left for the user to merge up and push via the project's git workflow — **you
 do not push, and you do not merge outside your worktree.**
+
+When the stop reason is **config-shaped** — a write-guard hook inactive, a
+wave that failed systemically on a blocked command, or workers denied on a
+gate or bootstrap command — the summary must also (a) recommend the user run
+`/setup-ralph` with a one-line description of the symptom, and (b) quote the
+exact denied command string(s) verbatim, so the repair run starts from ground
+truth rather than a vague report. Do **not** recommend `/setup-ralph` for a
+code-shaped failure (a red gate from a real cross-issue break, exhausted
+retries on genuine bugs) — `setup-ralph` repairs configuration, not code.
 
 ## Dispatch template and integration procedures
 
