@@ -52,9 +52,11 @@ Walk the user through these one at a time — present, get an answer, move on:
   filled in with the answers from step 2.
 - **`.ralph/settings.json`** — from
   [templates/settings.template.json](./templates/settings.template.json), with
-  one `Bash(<cmd> *)` allow entry added per distinct gate command (e.g.
-  `Bash(pnpm *)`, `Bash(cargo *)`, `Bash(make *)`). Show the user the final
-  file before writing.
+  one allow entry per distinct gate command. The entry is the **whole gate
+  command** as a `:*` prefix — `Bash(pnpm typecheck:*)`, `Bash(bash check.sh:*)`
+  — never just its first token. `Bash(bash *)` or `Bash(pnpm *)` would let a
+  worker run `bash -c '<anything>'` or `pnpm dlx <anything>`: arbitrary code,
+  not the gate. Show the user the final file before writing.
 - **`docs/agents/issue-tracker.md`** — append a `## Ralph loop` section using
   the matching fragment: [local-markdown](./templates/issue-tracker-local.md),
   [GitHub](./templates/issue-tracker-github.md), or
@@ -72,6 +74,10 @@ and restores afterwards.
 
 ### 4. Done
 
-Tell the user setup is complete: `orchestrate-ralph` can now be run from a
-fresh git worktree. They can edit `docs/agents/ralph.md` by hand later;
-re-running this skill is only needed to start over.
+Tell the user setup is complete, and suggest they **commit the scaffolded
+files** — `docs/agents/ralph.md`, `.ralph/settings.json`, and the edits to
+`docs/agents/issue-tracker.md` and `CLAUDE.md` / `AGENTS.md`. `orchestrate-ralph`
+runs in a fresh git worktree, which only sees committed files; uncommitted
+scaffolding would be absent there and the run would fail its prerequisite
+check. They can edit `docs/agents/ralph.md` by hand later; re-running this skill
+is only needed to start over.
