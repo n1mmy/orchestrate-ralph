@@ -26,5 +26,18 @@
       "Bash(cd:*)",
       "Bash(git -C:*)"
     ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.ralph/hook-path-guard.py\""
+          }
+        ]
+      }
+    ]
   }
 }

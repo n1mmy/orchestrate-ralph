@@ -56,6 +56,7 @@ orchestrate-ralph/
 │   ├── SKILL.md
 │   └── templates/
 │       ├── settings.template.json
+│       ├── hook-path-guard.py
 │       ├── ralph.md
 │       ├── issue-tracker-local.md
 │       ├── issue-tracker-github.md

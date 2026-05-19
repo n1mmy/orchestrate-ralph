@@ -57,6 +57,12 @@ Walk the user through these one at a time — present, get an answer, move on:
   — never just its first token. `Bash(bash *)` or `Bash(pnpm *)` would let a
   worker run `bash -c '<anything>'` or `pnpm dlx <anything>`: arbitrary code,
   not the gate. Show the user the final file before writing.
+- **`.ralph/hook-path-guard.py`** — copy
+  [templates/hook-path-guard.py](./templates/hook-path-guard.py) verbatim;
+  there is nothing to fill in. It is the `PreToolUse` path-guard hook that
+  `.ralph/settings.json` references — it denies a worker writing outside its
+  worktree. It must be committed, so it is present in every worker's worktree
+  checkout.
 - **`docs/agents/issue-tracker.md`** — append a `## Ralph loop` section using
   the matching fragment: [local-markdown](./templates/issue-tracker-local.md),
   [GitHub](./templates/issue-tracker-github.md), or
@@ -75,8 +81,9 @@ and restores afterwards.
 ### 4. Done
 
 Tell the user setup is complete, and suggest they **commit the scaffolded
-files** — `docs/agents/ralph.md`, `.ralph/settings.json`, and the edits to
-`docs/agents/issue-tracker.md` and `CLAUDE.md` / `AGENTS.md`. `orchestrate-ralph`
+files** — `docs/agents/ralph.md`, `.ralph/settings.json`,
+`.ralph/hook-path-guard.py`, and the edits to `docs/agents/issue-tracker.md`
+and `CLAUDE.md` / `AGENTS.md`. `orchestrate-ralph`
 runs in a fresh git worktree, which only sees committed files; uncommitted
 scaffolding would be absent there and the run would fail its prerequisite
 check. They can edit `docs/agents/ralph.md` by hand later; re-running this skill

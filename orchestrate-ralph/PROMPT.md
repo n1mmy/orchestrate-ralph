@@ -29,9 +29,14 @@ The cost of skipping this is wrong code that has to be redone.
    base; the orchestrator's dispatch prompt gives you a `git reset --hard
    <integration-tip>` to run first, then a `git rev-parse --show-toplevel` to
    pin your worktree root. Every file you create or edit must resolve under
-   that root — see "Stay in your worktree". Then, if `docs/agents/ralph.md`
-   defines an env-bootstrap step, perform it — your isolated worktree may lack
-   the gitignored files the gate needs.
+   that root — see "Stay in your worktree". The dispatch prompt also has you
+   **self-test the path-guard hook** — attempt the probe `Write` it specifies
+   (a path outside your worktree); the hook must reject it. If that write
+   instead *succeeds*, the hook is not protecting you: stop immediately, report
+   outcome `failed` with reason "path-guard hook inactive", and do not touch
+   the issue. Then, if `docs/agents/ralph.md` defines an env-bootstrap step,
+   perform it — your isolated worktree may lack the gitignored files the gate
+   needs.
 2. **Implement the issue.** Follow its "What to build" literally and satisfy
    every acceptance criterion. Keep scope lean — no abstractions, defensive
    machinery, or features beyond what the issue requires. If the issue seems

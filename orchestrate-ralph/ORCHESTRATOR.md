@@ -49,7 +49,10 @@ revisit.
   worker's *file writes* stay inside its worktree only by its own path
   discipline — see the escape checks in step 5. Running the orchestrator in a
   separate worktree changes only the *blast radius* of an escape, not whether
-  one can happen.
+  one can happen. The path-guard hook shipped in `.ralph/settings.json` (a
+  `PreToolUse` hook) now hard-denies `Write` / `Edit` / `NotebookEdit` outside
+  the worktree; `Bash`-mediated writes cannot be statically guarded and remain
+  covered by the command-shape doctrine and step-5 detection.
 - `run_in_background: true` **silently drops** that isolation — the sub-agent
   then runs in the orchestrator's own worktree on the integration branch.
   Background dispatch is therefore unusable here: parallel workers would
@@ -193,7 +196,9 @@ message or a fresh `orchestrate-ralph` invocation:
 - If no issue is eligible but `ready-for-agent` issues remain (all blocked),
   halt and surface it.
 - Record the integration tip (`git rev-parse HEAD`) — the pre-wave tip, needed
-  for revert in step 7 — and the wave start time (`date +%s`).
+  for revert in step 7 — the wave start time (`date +%s`), and a pre-wave
+  untracked-files baseline (`git status --porcelain`), needed for the
+  untracked-escape check in step 5.
 
 ### 3 — Dispatch the wave (foreground, one message)
 
@@ -245,13 +250,15 @@ two ways:
   advanced on its own. If it has, a worker committed onto the integration
   branch directly: **halt** on a worktree-isolation breach (see stop
   conditions). The branch's trust is broken; do not merge on top of it.
-- **Untracked escape.** Run `git status --porcelain`. A worker may have written
-  project files into this checkout via an absolute or worktree-climbing path —
-  untracked, so the tip never moved and the committed-escape check passed
-  clean. This is **not** fatal: the worker's own branch still carries the
-  correct deliverable, and the escaped files are duplicate litter. Note it
-  against the issue and continue — but expect the litter to collide with a
-  merge below.
+- **Untracked escape.** Run `git status --porcelain` and diff it against the
+  pre-wave baseline from step 2. Only *newly* appeared untracked files are the
+  signal — a worker wrote project files into this checkout via an absolute or
+  worktree-climbing path (untracked, so the tip never moved and the
+  committed-escape check passed clean); files already in the baseline are
+  pre-existing build artifacts, not an escape. This is **not** fatal: the
+  worker's own branch still carries the correct deliverable, and the escaped
+  files are duplicate litter. Note it against the issue and continue — but
+  expect the litter to collide with a merge below.
 
 Then, for each worker:
 
@@ -372,6 +379,11 @@ Halt the loop when any of these hold:
   onto the integration branch; the branch's trust is broken. Halt and surface
   it for the user to inspect. An *untracked*-file escape is not a stop
   condition — step 5 detects it, cleans any merge collision, and continues.
+- **Write-guard hook inactive** — a worker's setup self-test reported the
+  path-guard hook is not enforcing (`failed`, reason "path-guard hook
+  inactive"). Hook propagation is all-or-nothing, so this is systemic: halt at
+  once. Without the hook the run cannot contain worker escapes; do not retry
+  the issue or dispatch further waves.
 
 On any halt, and at end-of-run, print a summary: issues done, issues
 `needs-info` (with reasons), waves run, stop reason. The integration branch is
@@ -397,6 +409,13 @@ you carry the doctrine to it).
 > no network. Your worktree has no work yet, so the reset is safe. Then run
 > `git rev-parse --show-toplevel` and pin that path as your worktree root —
 > every file you create or edit must resolve under it.
+>
+> Then self-test the path-guard hook: attempt a `Write` of the text `probe` to
+> `/tmp/ralph-hook-probe-<your-branch-name>`. That path is outside your
+> worktree, so the hook must **reject** the write — a rejection is the success
+> signal, proceed. If the write instead **succeeds**, the hook is not
+> protecting this worktree: stop now, report `failed` with reason "path-guard
+> hook inactive", and do not start the issue.
 >
 > Your worker doctrine — follow it exactly:
 >

@@ -15,9 +15,13 @@ directly) was also observed earlier.
 
 ## Decision
 
-1. **Treat escapes as mitigate-and-detect, not prevent.** No filesystem
-   sandbox is available to the skill, so the loop cannot stop an escape — it
-   hardens worker path discipline and checks for escapes after each wave.
+1. **Prevent what is statically guardable; detect the rest.** A `PreToolUse`
+   path-guard hook — script `.ralph/hook-path-guard.py`, wired in
+   `.ralph/settings.json` — hard-denies `Write` / `Edit` / `NotebookEdit` whose
+   target resolves outside the worktree. `Bash`-mediated writes cannot be
+   statically guarded, so they stay covered by worker doctrine and post-wave
+   detection. The hook rides on subagent settings inheritance, so each worker
+   self-tests it at setup and the run halts if it is not enforcing.
 
 2. **Worker doctrine forbids the actual failure mode.** `PROMPT.md` already
    bans `cd` / `git -C` / full binary paths; it now also requires project
@@ -59,7 +63,11 @@ directly) was also observed earlier.
   variant self-recovers, the committed variant halts for the user.
 - Non-colliding untracked litter is left in place and reported — the
   orchestrator cleans only what blocks a merge.
-- The true fix is a filesystem sandbox confining a worker's writes to its
-  worktree. That is a Claude Code harness capability the skill cannot provide.
-  If the harness gains it, the step-5 escape checks become a backstop rather
-  than the primary defence.
+- The path-guard hook is the skill's filesystem guard for the tool calls whose
+  target is statically known. A full sandbox confining *`Bash`-mediated* writes
+  is still a Claude Code harness capability the skill cannot provide; until
+  then, the command-shape doctrine and step-5 detection cover that residue.
+- The hook only protects a worker if its settings reach the worker subagent —
+  unverified harness behaviour. The per-worker self-test converts that
+  assumption into a checked precondition: a run halts rather than proceeding
+  with an unenforced guard.
