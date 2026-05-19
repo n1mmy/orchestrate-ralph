@@ -1,0 +1,28 @@
+{
+  "permissions": {
+    "allow": [
+      "Write",
+      "Read",
+      "Edit",
+      "Glob",
+      "Grep",
+      "Bash(git *)",
+      "Bash(rg *)",
+      "Bash(grep *)",
+      "Bash(find *)",
+      "Bash(command -v *)",
+      "Bash(which *)",
+      "Bash(test *)",
+      "Bash(echo *)",
+      "Bash(date +%s)"
+    ],
+    "deny": [
+      "Bash(git push:*)",
+      "Bash(git fetch:*)",
+      "Bash(git pull:*)",
+      "Bash(git clone:*)",
+      "Bash(git ls-remote:*)",
+      "Bash(git remote:*)"
+    ]
+  }
+}
