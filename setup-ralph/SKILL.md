@@ -27,8 +27,6 @@ Read the repo; don't assume.
   `scripts` (`typecheck`, `lint`, `test`, `build`), `Makefile` targets,
   `Cargo.toml`, `pyproject.toml` / `tox.ini`, and any CI workflow files.
   Assemble a candidate ordered list, cheap checks first.
-- **The integration base branch** — `git symbolic-ref refs/remotes/origin/HEAD`,
-  or the current default branch.
 - **Env bootstrap** — is there a committed env template (`.env.example`,
   `.env.sample`, a `.env.*` checked into git) that a fresh worktree must
   materialise before the gate will pass?
@@ -42,7 +40,6 @@ Walk the user through these one at a time — present, get an answer, move on:
 
 - **Gate** — show the autodetected command list; let the user correct it.
   Order matters: a change must pass each command in turn.
-- **Integration base branch** — confirm.
 - **Env bootstrap** — confirm the step in one line, or record "None".
 - **Parallelism** — `parallel-safe` is true only if the tracker exposes a
   dependency relation the orchestrator can read (an issue's `Blocked by`, or

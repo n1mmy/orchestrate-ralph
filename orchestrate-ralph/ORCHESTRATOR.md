@@ -22,8 +22,8 @@ This doctrine is generic. Three project-specific facts live in the repo, not
 here — read them at the start of the run and treat them as authoritative:
 
 - **`docs/agents/ralph.md`** — the verification **gate** (the ordered list of
-  commands a change must pass), the **integration base branch**, the optional
-  **env-bootstrap** step, the **`parallel-safe`** flag, and **protected paths**.
+  commands a change must pass), the optional **env-bootstrap** step, the
+  **`parallel-safe`** flag, and **protected paths**.
 - **`docs/agents/issue-tracker.md`**, its **"Ralph loop"** section — how to
   *discover* `ready-for-agent` issues, *read* an issue, resolve its
   *dependency* relation, *group* issues by feature, and *transition* /
