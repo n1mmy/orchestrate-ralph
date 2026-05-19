@@ -34,10 +34,14 @@ does not. Before starting:
 2. If it exists and is **byte-identical** to `.ralph/settings.json`, an
    earlier run already placed it — proceed.
 3. If it exists and **differs** from `.ralph/settings.json`, **stop with an
-   error.** A checkout that already carries its own `settings.local.json` is
-   not clean enough to host the loop. Do not back it up, swap it, or restore
-   it — tell the user to run the loop in a fresh worktree (or, if they are
-   sure the file is disposable, remove it themselves) and stop.
+   error.** A pre-existing `.claude/settings.local.json` is the user's own
+   allow/deny list, accumulated from interactive use — it is valuable, not
+   stale, and the loop must never overwrite, swap, or back it up. The loop
+   simply must not run in a checkout that holds one. Tell the user to run in
+   a fresh worktree — the recommended location anyway, and one with no
+   `settings.local.json` to endanger. **Do not suggest they delete the
+   file**; treating their interactive settings as disposable scaffolding is
+   the mistake this rule exists to prevent.
 
 The loop does not restore or remove `.claude/settings.local.json` when it
 ends: the run happens in a disposable worktree, the file is gitignored, and
