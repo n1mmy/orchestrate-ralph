@@ -91,6 +91,7 @@ assumption; the doc is most useful once each row has a result.
 | 8 | `dontAsk` causes any unallowlisted call to auto-deny as a tool error (no prompt) | `ORCHESTRATOR.md`; setup-ralph "worker permission mode" prose; ADR 0004 | covered by every catalog test — the procedure's enforcement-confirmation step is the canonical case | confirmed — every `cd .`, `env`, `rm`, `mkdir`, `claude --version`, `ls /tmp`, `ls /` produced "Denied by permissions" with no prompt; refinement: "unallowlisted" excludes the built-in safe-command list |
 | 9 | The `PreToolUse` path-guard hook fires for `Write` / `Edit` / `NotebookEdit` whose target resolves outside `realpath(cwd)` | `setup-ralph/templates/hook-path-guard.py`; ADR 0002 | H1–H4 | confirmed for H1–H3; H4 not run (needs `EXTRA_ALLOWED_ROOTS` edit + session restart) |
 | 10 | Glob expansion / quoting / env-var expansion in the command don't change which allow rule matches | implicit; no specific doctrine, but assumed by `Bash(echo:*)` matching `echo "hello world"` etc. | F1–F4 | falsified — F3 (`echo $HOME`) was Denied; the matcher rejects commands containing unexpanded `$VAR` references in the same shape that gets blocked for absolute external paths. Quoted strings (F1) and globs (F2) and escaped `\$` (F4) are unaffected. |
+| 11 | A command invoked by full path (e.g. `/usr/bin/git`) is "a different, unrecognised shape" and fails to match the allow rule for the bare command name | `PROMPT.md:93–94`; `ORCHESTRATOR.md:110` ("never run a command by full path") | N1–N6 | confirmed — but the rationale is sharper than the doctrine states. N5 shows the gate fires even for an absolute path **inside** the worktree, so it isn't the argument-path gate (§2) re-firing on the first token. It is a separate name-shape lookup: any `/` in the first token (`/abs/path` or `./relative`) makes the lookup miss against both the allow list and the safe list. |
 
 ## Test catalog
 
@@ -198,6 +199,30 @@ T1–T3 probe whether the bare tool-name entries in the template
 necessary under `dontAsk`, or whether top-level tools are always
 permitted regardless of the allow list.
 
+### Group N — command-name shape (path-bearing first token)
+
+Added 2026-05-20 after a follow-up probe. Doctrine claim:
+`PROMPT.md:93–94` says "Run commands bare, not by full path. `git`,
+`pnpm`, `node` — not `/usr/bin/git`; an explicit path is a different,
+unrecognised shape." These tests measure that rule directly and
+disambiguate it from Group B's argument-path gate.
+
+| ID | Allow | Command | Expected | Empirical |
+|---|---|---|---|---|
+| N1 | `Bash(git:*)` | `/usr/bin/git status` | Denied | Denied (2026-05-20) |
+| N2 | `Bash(echo:*)` | `/usr/bin/echo hello` | Denied | Denied (2026-05-20) |
+| N3 | `Bash(ls:*)` | `/bin/ls` | Denied | Denied (2026-05-20) |
+| N4 | (safe list) | `/usr/bin/whoami` | Denied | Denied (2026-05-20) — safe list doesn't cover the path-bearing form |
+| N5 | `Bash(echo:*)` (irrelevant) | `/home/ubuntu/data/local/orchestrate-ralph/CONTEXT.md` (absolute path INSIDE worktree, non-executable file) | Denied if the gate is "first token contains `/`"; Allowed if it's the path-locality gate | Denied (2026-05-20) — proves the gate is on the first token's shape, not on whether the path is inside cwd |
+| N6 | `Bash(echo:*)` (irrelevant) | `./CONTEXT.md` (relative, leading `./`) | Denied if the gate is "first token contains `/`" | Denied (2026-05-20) — `./X` is rejected the same way |
+
+N5 is the disambiguation probe. Group B's `ls /tmp` (Denied) and
+`ls /home/.../orchestrate-ralph` (Allowed) show the path-locality gate
+*on argument tokens* draws a line at the worktree boundary. N5 puts an
+absolute path **inside** the worktree as the *first* token and it's
+still Denied — so the first-token gate doesn't care about the worktree
+boundary, only that the token contains `/`.
+
 ### Group H — path-guard hook (assumption #9)
 
 | ID | Setup | Tool call | Expected | Empirical |
@@ -237,14 +262,14 @@ worker can't run X" is wrong for the safe-list commands. In particular,
 `Bash(date +%s)` in `setup-ralph/templates/settings.template.json` is
 dead weight — `date` runs regardless.
 
-### 2. Path-aware command-shape gate (stricter than `:*` suggests)
+### 2. Argument path-locality gate (stricter than `:*` suggests)
 
 `Bash(<cmd>:*)` does NOT match every suffix. The matcher rejects
-command shapes that reference paths outside `realpath(cwd)` or contain
-unexpanded `$VAR` references, even when the command name and explicit
-allow rule match. The gate is **general across multiple
-content-reading commands**, not specific to `ls`. Confirmed on
-2026-05-20:
+command shapes whose **argument tokens** reference absolute paths
+outside `realpath(cwd)`, or contain unexpanded `$VAR` references, even
+when the command name and explicit allow rule match. The gate is
+**general across multiple content-reading commands**, not specific to
+`ls`. Confirmed on 2026-05-20:
 
 | Command | Outside cwd | Inside cwd |
 |---|---|---|
@@ -287,7 +312,39 @@ doctrine doesn't mention. Two follow-ups for the doctrine:
 - Stop relying on the "any positional arg works" reading of `:*` —
   it doesn't hold for paths outside the worktree.
 
-### 3. Command substitution stays denied (good news for the doctrine)
+### 3. Command-name shape gate (rejects path-bearing first tokens)
+
+A separate gate from §2: the matcher also rejects any first token that
+contains `/`, regardless of whether the path is inside or outside the
+worktree. Confirmed on 2026-05-20 (Group N):
+
+- `/usr/bin/git status` — Denied (despite `Bash(git:*)`)
+- `/usr/bin/echo hello` — Denied (despite `Bash(echo:*)`)
+- `/bin/ls` — Denied (despite `Bash(ls:*)`)
+- `/usr/bin/whoami` — Denied (despite `whoami` on the built-in safe list)
+- `/home/ubuntu/data/local/orchestrate-ralph/CONTEXT.md` — Denied (absolute path **inside** the worktree)
+- `./CONTEXT.md` — Denied (relative path, leading `./`)
+
+The N5 probe is the load-bearing one: an absolute path *inside* the
+worktree is rejected as a first token, so this can't be the §2 gate
+firing — the §2 gate would have let an inside-cwd path through. The
+matcher uses the bare command-name token as the lookup key into the
+allow rules and the safe list; any `/` in that token makes the lookup
+miss.
+
+So PROMPT.md:93–94's rule "Run commands bare, not by full path" is
+**correct** — but the actual reason is the name-shape lookup, not "an
+explicit path is a different, unrecognised shape" (which conflates two
+distinct mechanisms). Doctrine should distinguish:
+
+- **Don't write `/usr/bin/git`** — the *first token* must be a bare
+  command name with no `/`.
+- **Don't write `cat /etc/passwd`** — *argument tokens* must not be
+  absolute paths outside the worktree.
+
+These are independent. A worker can hit one without the other.
+
+### 4. Command substitution stays denied (good news for the doctrine)
 
 E5/E6 confirmed: `$(...)` and backtick wrappers do not bypass the
 matcher. `echo $(whoami)` was Denied even though both `echo` (via the
