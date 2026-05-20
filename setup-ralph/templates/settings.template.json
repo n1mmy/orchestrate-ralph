@@ -7,6 +7,7 @@
       "Edit",
       "Glob",
       "Grep",
+      "Agent",
       "Bash(git:*)",
       "Bash(rg:*)",
       "Bash(ugrep:*)",
