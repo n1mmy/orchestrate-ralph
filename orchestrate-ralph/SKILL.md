@@ -98,10 +98,3 @@ orchestrator it describes. Run that loop until a stop condition fires.
 wave selection, dispatch, retries, merge and gate-verify, escalation, stop
 conditions. This skill only points at it; do not paraphrase or second-guess it
 here.
-
-## Watching a run
-
-`watch-steps.py` (in this skill folder) turns the workers' transcripts into a
-compact one-line-per-tool-call log. Run it in a separate terminal:
-`python3 <skill-folder>/watch-steps.py <repo-worktree-path>`. It is a plain
-process, not an agent — nothing it reads enters any agent's context.

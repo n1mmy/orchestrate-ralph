@@ -304,8 +304,7 @@ isolation; see step 4.
 
 A foreground wave suspends you until the whole dispatch message returns. You
 cannot wake, monitor, or kill a worker mid-wave. (The human can still watch
-progress — workers render their steps in the GUI, and `watch-steps.py` gives
-the same view in a terminal.)
+progress — workers render their steps in the Claude Code GUI.)
 
 One consequence: **`WORKER_TIMEOUT` is advisory — you do not enforce it.** You
 have no kill hook. Enforcement is worker-side: the dispatch template tells each
