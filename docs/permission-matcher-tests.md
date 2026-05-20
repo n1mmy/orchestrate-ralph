@@ -94,6 +94,8 @@ assumption; the doc is most useful once each row has a result.
 | 9 | The `PreToolUse` path-guard hook fires for `Write` / `Edit` / `NotebookEdit` whose target resolves outside `realpath(cwd)` | `setup-ralph/templates/hook-path-guard.py`; ADR 0002 | H1–H4 | confirmed for H1–H3; H4 not run (needs `EXTRA_ALLOWED_ROOTS` edit + session restart) |
 | 10 | Glob expansion / quoting / env-var expansion in the command don't change which allow rule matches | implicit; no specific doctrine, but assumed by `Bash(echo:*)` matching `echo "hello world"` etc. | F1–F4 | falsified — F3 (`echo $HOME`) was Denied; the matcher rejects commands containing unexpanded `$VAR` references in the same shape that gets blocked for absolute external paths. Quoted strings (F1) and globs (F2) and escaped `\$` (F4) are unaffected. |
 | 11 | A command invoked by full path (e.g. `/usr/bin/git`) is "a different, unrecognised shape" and fails to match the allow rule for the bare command name | `PROMPT.md:93–94`; `ORCHESTRATOR.md:110` ("never run a command by full path") | N1–N6 | confirmed — but the rationale is sharper than the doctrine states. N5 shows the gate fires even for an absolute path **inside** the worktree, so it isn't the argument-path gate (§2) re-firing on the first token. It is a separate name-shape lookup: any `/` in the first token (`/abs/path` or `./relative`) makes the lookup miss against both the allow list and the safe list. |
+| 12 | Multi-word `:*` prefixes in allow / deny rules (`Bash(git push:*)`, `Bash(git status:*)`) match exactly the multi-word prefix plus any suffix, and do not match unrelated subcommands | `setup-ralph/templates/settings.template.json` deny block (`Bash(git push:*)`, `Bash(git fetch:*)`, etc.); template-mode prose | M1, M2, M5 | not run — load-bearing for the remote-git deny block but currently unverified. |
+| 13 | `Bash(<cmd>:*)` matches strictly the first-token command name, not arbitrary first-token text starting with `<cmd>` (i.e., the matcher tokenises on word boundary, so `Bash(rm:*)` does not match `rmdir`) | Implicit everywhere a short command is allowlisted via `:*` (`Bash(rm:*)` would be problematic if it over-matched `rmdir`); also a security-relevant property of every `Bash(<short>:*)` rule | M4 | not run — the disambiguation probe; either result has wide implications. |
 
 ## Test catalog
 
@@ -238,6 +240,39 @@ boundary, only that the token contains `/`.
 H5 documents the known limit: the hook only sees Claude's own
 `Write`/`Edit`/`NotebookEdit` calls. Anything mediated by `Bash` — a
 subprocess writing to the filesystem — bypasses the hook by design.
+
+### Group M — multi-word prefixes and first-token boundary (assumptions #12, #13)
+
+Tests whether multi-word `:*` rules (`Bash(git push:*)`,
+`Bash(git status:*)`) behave as intended — load-bearing for the template's
+remote-git deny block — and whether the matcher tokenises the first token
+on a word boundary (so `Bash(rm:*)` does not match `rmdir`) or treats
+`:*` as a pure literal-prefix wildcard (which would make every short-name
+allow rule over-broad).
+
+**All probes are deliberately side-effect free.** `git push --help` is
+intercepted by git's `--help` handler and execs the man page — no network
+contact, no on-disk change. `git status` and `git status --short` are
+read-only. `rmdir --help` prints help and exits without touching a
+directory. If you add probes to this group, hold to the same standard:
+**no probe may have real-world side effects even in the failure mode
+where the matcher unexpectedly Allows.**
+
+| ID | Allow / Deny | Command | Expected | Empirical |
+|---|---|---|---|---|
+| M0 | (no allow rule for `rmdir`) | `rmdir --help` | Denied | not run — precondition for M4. If `rmdir` is on the safe list, M4 cannot be interpreted and a different pair (or M0 setup) is needed. |
+| M1 | deny `Bash(git push:*)`, allow `Bash(git:*)` | `git push --help` | Denied | not run — needs the remote-git deny block plus `Bash(git:*)`. Confirms multi-word deny matches a `git push <suffix>` shape. `--help` is a no-op. |
+| M2 | same | `git status` | Allowed | not run — confirms multi-word deny doesn't over-match unrelated `git` subcommands. Read-only. |
+| M4 | allow `Bash(rm:*)` only (no other rule for `rmdir`) | `rmdir --help` | Denied if word-boundary tokenisation; Allowed if pure literal prefix matching | not run — **the disambiguation probe.** Either result has consequences for every `Bash(<short>:*)` rule shipped. `rmdir --help` is a no-op. |
+| M5 | allow `Bash(git status:*)` only | `git status --short` | Allowed | not run — confirms multi-word allow accepts suffix args. Read-only. |
+
+**Known limit:** the catalog does not probe whether a multi-word allow
+like `Bash(git status:*)` over-matches a *similar* shape such as
+`git status-x` or `git statusquery`. No real binary fits that probe
+without inventing fictional `git` subcommands, and the matcher's response
+is consistent enough across A1-style probes that pure-prefix
+over-matching at the multi-word level would be the same falsification as
+M4 at the first-token level. Re-probe if M4 reveals pure-prefix semantics.
 
 ## Findings from the 2026-05-20 run
 
