@@ -81,16 +81,16 @@ assumption; the doc is most useful once each row has a result.
 
 | # | Assumption | Where it lives | Test(s) | Status |
 |---|---|---|---|---|
-| 1 | `:*` after a command name allowlists "any suffix" | `setup-ralph/SKILL.md` step 3; common template entries like `Bash(git:*)` | A1–A5 | — |
-| 2 | A bare command name with no `:*` is an exact match | `Bash(date +%s)` in the template uses this shape | C1–C4 | — |
-| 3 | Compound shapes (`&&` / `||` / `;` / pipes / redirects / subshells) are distinct patterns from their parts and fail when not explicitly allowlisted | `ORCHESTRATOR.md` "Bash command shape"; `PROMPT.md` "Bash command shape"; the live-run-doctrine commits | D1–D6, E1–E7 | — |
-| 4 | The matcher decomposes `&&`-chained compounds and checks each half against allow + deny | `ORCHESTRATOR.md` step 6 implicitly; permission-denied worker doctrine | D1, D2, D3 | — |
-| 5 | A flag-bearing variant of an allowlisted command (e.g. `ls -la`) is matched by `Bash(<cmd>:*)` | various template entries assume this | B1, B2, B4 | — |
+| 1 | `:*` after a command name allowlists "any suffix" | `setup-ralph/SKILL.md` step 3; common template entries like `Bash(git:*)` | A1–A5 | partial — A1–A5 confirmed for flag-only suffixes; B3 falsifies for absolute paths outside the worktree (see findings) |
+| 2 | A bare command name with no `:*` is an exact match | `Bash(date +%s)` in the template uses this shape | C1–C4 | falsified — C4 ran despite the rule being exact; `date` is on Claude Code's built-in safe-command list and bypasses the allow check entirely. C1/C2 not isolated (see findings). |
+| 3 | Compound shapes (`&&` / `||` / `;` / pipes / redirects / subshells) are distinct patterns from their parts and fail when not explicitly allowlisted | `ORCHESTRATOR.md` "Bash command shape"; `PROMPT.md` "Bash command shape"; the live-run-doctrine commits | D1–D6, E1–E7 | partial — E5/E6 confirm subshells don't bypass; D1/D4/D5/D6 confirm separators are matched per-segment; E3 confirms redirects to outside-workspace are gated; D3 falsifies for the "allow rule missing" subcase when the unallowlisted segment is on the built-in safe list (`whoami`) |
+| 4 | The matcher decomposes `&&`-chained compounds and checks each half against allow + deny | `ORCHESTRATOR.md` step 6 implicitly; permission-denied worker doctrine | D1, D2, D3 | confirmed — D2 catches a deny on the right half; follow-up probe `echo a && env` is denied because `env` is denied alone. D3 was Allowed only because the right half is on the built-in safe list. |
+| 5 | A flag-bearing variant of an allowlisted command (e.g. `ls -la`) is matched by `Bash(<cmd>:*)` | various template entries assume this | B1, B2, B4 | partial — B1/B2 confirm flag args match; B3 falsifies for absolute paths outside the worktree (path-aware gate intercepts before the allow rule applies); B4–B7 not run (need session restart) |
 | 6 | Worker subagents launched with `isolation: "worktree"` inherit the orchestrator's loaded `.claude/settings.local.json` (allowlist, deny, `dontAsk`, hook) | `ORCHESTRATOR.md` prereq #2; `handoff.md` "Resolved — hook propagation" | see `docs/subagent-permission-tests.md` instead — that catalog covers propagation | — |
-| 7 | Top-level tools (`Write`, `Read`, `Edit`, `Agent`, `Glob`, `Grep`) need explicit allow entries under `dontAsk`, else they auto-deny | settings template lists them; ADR 0004 names `Agent` as the load-bearing one | T1–T3 | — |
-| 8 | `dontAsk` causes any unallowlisted call to auto-deny as a tool error (no prompt) | `ORCHESTRATOR.md`; setup-ralph "worker permission mode" prose; ADR 0004 | covered by every catalog test — the procedure's enforcement-confirmation step is the canonical case | — |
-| 9 | The `PreToolUse` path-guard hook fires for `Write` / `Edit` / `NotebookEdit` whose target resolves outside `realpath(cwd)` | `setup-ralph/templates/hook-path-guard.py`; ADR 0002 | H1–H4 | — |
-| 10 | Glob expansion / quoting / env-var expansion in the command don't change which allow rule matches | implicit; no specific doctrine, but assumed by `Bash(echo:*)` matching `echo "hello world"` etc. | F1–F4 | — |
+| 7 | Top-level tools (`Write`, `Read`, `Edit`, `Agent`, `Glob`, `Grep`) need explicit allow entries under `dontAsk`, else they auto-deny | settings template lists them; ADR 0004 names `Agent` as the load-bearing one | T1–T3 | not run — current session has all tools allowed; needs a session whose allow list omits them |
+| 8 | `dontAsk` causes any unallowlisted call to auto-deny as a tool error (no prompt) | `ORCHESTRATOR.md`; setup-ralph "worker permission mode" prose; ADR 0004 | covered by every catalog test — the procedure's enforcement-confirmation step is the canonical case | confirmed — every `cd .`, `env`, `rm`, `mkdir`, `claude --version`, `ls /tmp`, `ls /` produced "Denied by permissions" with no prompt; refinement: "unallowlisted" excludes the built-in safe-command list |
+| 9 | The `PreToolUse` path-guard hook fires for `Write` / `Edit` / `NotebookEdit` whose target resolves outside `realpath(cwd)` | `setup-ralph/templates/hook-path-guard.py`; ADR 0002 | H1–H4 | confirmed for H1–H3; H4 not run (needs `EXTRA_ALLOWED_ROOTS` edit + session restart) |
+| 10 | Glob expansion / quoting / env-var expansion in the command don't change which allow rule matches | implicit; no specific doctrine, but assumed by `Bash(echo:*)` matching `echo "hello world"` etc. | F1–F4 | falsified — F3 (`echo $HOME`) was Denied; the matcher rejects commands containing unexpanded `$VAR` references in the same shape that gets blocked for absolute external paths. Quoted strings (F1) and globs (F2) and escaped `\$` (F4) are unaffected. |
 
 ## Test catalog
 
@@ -113,57 +113,57 @@ calls).
 
 | ID | Allow | Command | Expected | Empirical |
 |---|---|---|---|---|
-| A1 | `Bash(echo:*)` | `echo` | Allowed | |
-| A2 | `Bash(echo:*)` | `echo hello` | Allowed | |
-| A3 | `Bash(echo:*)` | `echo hello world` | Allowed | |
-| A4 | `Bash(echo:*)` | `echo "hello world"` (quoted) | Allowed | |
-| A5 | `Bash(echo:*)` | `  echo hello` (leading whitespace) | Allowed | |
+| A1 | `Bash(echo:*)` | `echo` | Allowed | Allowed (2026-05-20) |
+| A2 | `Bash(echo:*)` | `echo hello` | Allowed | Allowed (2026-05-20) |
+| A3 | `Bash(echo:*)` | `echo hello world` | Allowed | Allowed (2026-05-20) |
+| A4 | `Bash(echo:*)` | `echo "hello world"` (quoted) | Allowed | Allowed (2026-05-20) |
+| A5 | `Bash(echo:*)` | `  echo hello` (leading whitespace) | Allowed | Allowed (2026-05-20) |
 
 ### Group B — flag-arg variants (assumption #5)
 
 | ID | Allow | Command | Expected | Empirical |
 |---|---|---|---|---|
-| B1 | `Bash(ls:*)` | `ls` | Allowed | |
-| B2 | `Bash(ls:*)` | `ls -la` | Allowed | |
-| B3 | `Bash(ls:*)` | `ls /tmp` (positional arg) | Allowed | |
-| B4 | `Bash(ls -la:*)` | `ls -la` | Allowed | |
-| B5 | `Bash(ls -la:*)` | `ls -lah` | Allowed | |
-| B6 | `Bash(ls -la:*)` | `ls -al` (flag order swapped) | Allowed | |
-| B7 | `Bash(ls -la:*)` | `ls -la /tmp` (positional after flags) | Allowed | |
+| B1 | `Bash(ls:*)` | `ls` | Allowed | Allowed (2026-05-20) |
+| B2 | `Bash(ls:*)` | `ls -la` | Allowed | Allowed (2026-05-20) |
+| B3 | `Bash(ls:*)` | `ls /tmp` (positional arg) | Allowed | **Denied** (2026-05-20) — absolute path outside the worktree. Probes during this run: `ls .`, `ls README.md`, `ls docs`, `ls /home/ubuntu/data/local/orchestrate-ralph` all Allowed; `ls /tmp`, `ls /usr/bin`, `ls /etc`, `ls /home` (ancestor of worktree), `ls /` all Denied. The gate is "absolute path not contained by `realpath(cwd)`" — ancestor paths count as outside, not just sibling paths. |
+| B4 | `Bash(ls -la:*)` | `ls -la` | Allowed | not run — needs session whose allow list contains `Bash(ls -la:*)` but not `Bash(ls:*)` |
+| B5 | `Bash(ls -la:*)` | `ls -lah` | Allowed | not run — same |
+| B6 | `Bash(ls -la:*)` | `ls -al` (flag order swapped) | Allowed | not run — same |
+| B7 | `Bash(ls -la:*)` | `ls -la /tmp` (positional after flags) | Allowed | not run — same |
 
 ### Group C — exact match, no `:*` (assumption #2)
 
 | ID | Allow | Command | Expected | Empirical |
 |---|---|---|---|---|
-| C1 | `Bash(echo)` | `echo` | Allowed | |
-| C2 | `Bash(echo)` | `echo hello` | Denied (allow rule missing) | |
-| C3 | `Bash(date +%s)` | `date +%s` | Allowed | |
-| C4 | `Bash(date +%s)` | `date +%s -u` | Denied | |
-| C5 | `Bash(pnpm typecheck)` | `pnpm typecheck` | Allowed | |
-| C6 | `Bash(pnpm typecheck)` | `pnpm typecheck 2>&1 \| tail -30` | Denied | |
+| C1 | `Bash(echo)` | `echo` | Allowed | not run — current session has `Bash(echo:*)`, so the no-`:*` rule's behaviour is masked |
+| C2 | `Bash(echo)` | `echo hello` | Denied (allow rule missing) | not run — same |
+| C3 | `Bash(date +%s)` | `date +%s` | Allowed | Allowed (2026-05-20) — but follow-up probes show `date`, `date +%Y` also Allowed, so the rule is not load-bearing; `date` is on the built-in safe-command list |
+| C4 | `Bash(date +%s)` | `date +%s -u` | Denied | **Allowed** (2026-05-20) — same: `date` is on the built-in safe list |
+| C5 | `Bash(pnpm typecheck)` | `pnpm typecheck` | Allowed | not run — needs `Bash(pnpm typecheck)` in allow |
+| C6 | `Bash(pnpm typecheck)` | `pnpm typecheck 2>&1 \| tail -30` | Denied | not run — same |
 
 ### Group D — command separators (assumptions #3, #4)
 
 | ID | Allow | Command | Expected | Empirical |
 |---|---|---|---|---|
-| D1 | `Bash(echo:*)` | `echo a && echo b` | Allowed | |
-| D2 | `Bash(echo:*)`, deny `Bash(cd:*)` | `echo a && cd .` | Denied (deny) | |
-| D3 | `Bash(echo:*)` only | `echo a && whoami` | Denied (allow rule missing) | |
-| D4 | `Bash(echo:*)` | `echo a ; echo b` | Allowed | |
-| D5 | `Bash(echo:*)` | `echo a \|\| echo b` | Allowed | |
-| D6 | `Bash(echo:*)` | `echo a &` (background) | Allowed | |
+| D1 | `Bash(echo:*)` | `echo a && echo b` | Allowed | Allowed (2026-05-20) |
+| D2 | `Bash(echo:*)`, deny `Bash(cd:*)` | `echo a && cd .` | Denied (deny) | Denied (2026-05-20) |
+| D3 | `Bash(echo:*)` only | `echo a && whoami` | Denied (allow rule missing) | **Allowed** (2026-05-20) — `whoami` is on the built-in safe list (Allowed on its own). Follow-up probe `echo a && env` is **Denied** (env is denied on its own), confirming `&&` does decompose for allow checks; the divergence is the safe list, not the decomposition. |
+| D4 | `Bash(echo:*)` | `echo a ; echo b` | Allowed | Allowed (2026-05-20) |
+| D5 | `Bash(echo:*)` | `echo a \|\| echo b` | Allowed | Allowed (2026-05-20) — second half was skipped by shell short-circuit but the matcher allowed the call |
+| D6 | `Bash(echo:*)` | `echo a &` (background) | Allowed | Allowed (2026-05-20) |
 
 ### Group E — pipes, redirects, subshells (assumption #3)
 
 | ID | Allow | Command | Expected | Empirical |
 |---|---|---|---|---|
-| E1 | `Bash(echo:*)`, `Bash(tail:*)` | `echo hello \| tail -1` | Allowed | |
-| E2 | `Bash(echo:*)` only (no `tail`) | `echo hello \| tail -1` | Denied (allow rule missing) | |
-| E3 | `Bash(echo:*)` | `echo hello > /tmp/x` | Allowed | |
-| E4 | `Bash(echo:*)` | `echo hello 2>&1 \| tail -1` (no `tail` in allow) | Denied | |
-| E5 | `Bash(echo:*)` | `echo $(whoami)` (command substitution, `whoami` unallowlisted) | Denied | |
-| E6 | `Bash(echo:*)` | `` echo `whoami` `` (backtick substitution) | Denied | |
-| E7 | `Bash(pnpm typecheck)` (exact) | `pnpm typecheck 2>&1 \| tail -30` | Denied | |
+| E1 | `Bash(echo:*)`, `Bash(tail:*)` | `echo hello \| tail -1` | Allowed | Allowed (2026-05-20) |
+| E2 | `Bash(echo:*)` only (no `tail`) | `echo hello \| tail -1` | Denied (allow rule missing) | not run — current session has `Bash(tail:*)` |
+| E3 | `Bash(echo:*)` | `echo hello > /tmp/x` | Allowed | **Denied** (2026-05-20) — `/tmp/x` is outside the worktree; same path-aware gate as B3 |
+| E4 | `Bash(echo:*)` | `echo hello 2>&1 \| tail -1` (no `tail` in allow) | Denied | not run — current session has `Bash(tail:*)` |
+| E5 | `Bash(echo:*)` | `echo $(whoami)` (command substitution, `whoami` unallowlisted) | Denied | Denied (2026-05-20) — note: even though `whoami` is on the built-in safe list (D3), wrapping it in `$(...)` still denies the outer call. Command substitution surfaces the inner command to the matcher and the wrapped form is rejected as a distinct shape. |
+| E6 | `Bash(echo:*)` | `` echo `whoami` `` (backtick substitution) | Denied | Denied (2026-05-20) — same |
+| E7 | `Bash(pnpm typecheck)` (exact) | `pnpm typecheck 2>&1 \| tail -30` | Denied | not run — needs `Bash(pnpm typecheck)` in allow |
 
 E2 and E1 together disambiguate two hypotheses for pipes: if E2 is
 Allowed, pipes are intra-command (the whole pipeline is one command,
@@ -180,18 +180,18 @@ to block this.**
 
 | ID | Allow | Command | Expected | Empirical |
 |---|---|---|---|---|
-| F1 | `Bash(echo:*)` | `echo "hello world"` | Allowed | |
-| F2 | `Bash(echo:*)` | `echo *` (glob) | Allowed | |
-| F3 | `Bash(echo:*)` | `echo $HOME` | Allowed | |
-| F4 | `Bash(echo:*)` | `echo \$HOME` (escaped) | Allowed | |
+| F1 | `Bash(echo:*)` | `echo "hello world"` | Allowed | Allowed (2026-05-20) |
+| F2 | `Bash(echo:*)` | `echo *` (glob) | Allowed | Allowed (2026-05-20) |
+| F3 | `Bash(echo:*)` | `echo $HOME` | Allowed | **Denied** (2026-05-20) — unexpanded `$VAR` triggers the same shape-rejection as outside-worktree paths; the matcher treats it as potentially resolving to a sensitive value |
+| F4 | `Bash(echo:*)` | `echo \$HOME` (escaped) | Allowed | Allowed (2026-05-20) — escaping the `$` removes the variable reference, so the gate doesn't fire |
 
 ### Group T — top-level tool gating (assumption #7)
 
 | ID | Allow | Tool call | Expected | Empirical |
 |---|---|---|---|---|
-| T1 | `Agent` NOT in allow | `Agent` dispatch | Denied | |
-| T2 | `Write` NOT in allow | `Write` to a worktree-internal path | Denied | |
-| T3 | `Read` NOT in allow | `Read` of any file | Denied | |
+| T1 | `Agent` NOT in allow | `Agent` dispatch | Denied | not run — current session has `Agent` in allow |
+| T2 | `Write` NOT in allow | `Write` to a worktree-internal path | Denied | not run — current session has `Write` in allow |
+| T3 | `Read` NOT in allow | `Read` of any file | Denied | not run — current session has `Read` in allow |
 
 T1–T3 probe whether the bare tool-name entries in the template
 (`Write`, `Read`, `Edit`, `Glob`, `Grep`, `Agent`) are actually
@@ -202,15 +202,101 @@ permitted regardless of the allow list.
 
 | ID | Setup | Tool call | Expected | Empirical |
 |---|---|---|---|---|
-| H1 | Hook installed, cwd is worktree root | `Write` `<worktree>/foo.txt` | Allowed | |
-| H2 | Hook installed | `Write` `/tmp/probe.txt` | Denied (hook, branded "Path-guard" message) | |
-| H3 | Hook installed, target uses `..` to climb above worktree | `Write` `../escape.txt` | Denied (hook canonicalises with realpath) | |
-| H4 | Hook installed, `EXTRA_ALLOWED_ROOTS = ["/tmp/whitelisted"]` | `Write` `/tmp/whitelisted/foo.txt` | Allowed | |
-| H5 | Hook installed | `Bash` `echo x > /tmp/escape.txt` (subprocess write outside worktree) | Allowed — hook does not cover subprocess writes | Documented in hook script header |
+| H1 | Hook installed, cwd is worktree root | `Write` `<worktree>/foo.txt` | Allowed | Allowed (2026-05-20) — probe written to `<worktree>/probe-h1.txt`; left behind because `rm` is not allowlisted |
+| H2 | Hook installed | `Write` `/tmp/probe.txt` | Denied (hook, branded "Path-guard" message) | Denied (2026-05-20) — error text: `Path-guard: Write targets /tmp/probe-h2.txt, outside this worktree (/home/ubuntu/data/local/orchestrate-ralph). …` |
+| H3 | Hook installed, target uses `..` to climb above worktree | `Write` `../escape.txt` | Denied (hook canonicalises with realpath) | Denied (2026-05-20) — `../probe-h3.txt` resolved to `/home/ubuntu/data/local/probe-h3.txt` and was rejected by the same hook message |
+| H4 | Hook installed, `EXTRA_ALLOWED_ROOTS = ["/tmp/whitelisted"]` | `Write` `/tmp/whitelisted/foo.txt` | Allowed | not run — needs edit to `hook-path-guard.py` + session restart |
+| H5 | Hook installed | `Bash` `echo x > /tmp/escape.txt` (subprocess write outside worktree) | Allowed — hook does not cover subprocess writes | Documented in hook script header. **2026-05-20 finding:** with the current `Bash(echo:*)` allow, this subprocess form is actually **Denied by the matcher** (E3) before the hook would have a chance to see it — so the hook's documented limit is masked by the path-aware Bash gate. The hook limit still applies to any subprocess form whose Bash command shape *is* allowlisted (e.g. `git`, `tee`, `cp`). |
 
 H5 documents the known limit: the hook only sees Claude's own
 `Write`/`Edit`/`NotebookEdit` calls. Anything mediated by `Bash` — a
 subprocess writing to the filesystem — bypasses the hook by design.
+
+## Findings from the 2026-05-20 run
+
+Two cross-cutting behaviours surfaced that no single test row captures
+cleanly. Both contradict assumptions the doctrine relies on; both
+warrant doctrine patches.
+
+### 1. Built-in safe-command list (bypasses the allow list)
+
+A set of read-only commands run successfully under `dontAsk` even when
+they have no allow-rule. Confirmed on 2026-05-20 in this session:
+
+- Allowed without a rule: `whoami`, `pwd`, `id`, `uname`, `date`,
+  `date +%Y`.
+- Denied without a rule (same session): `env`, `mkdir`, `rm`,
+  `claude --version`.
+
+So "allow list" is `template allow ∪ Claude-Code's built-in safe list`.
+The built-in list is not documented; treat it as opaque and re-probe
+after version bumps.
+
+Doctrine impact: any reasoning that says "if I don't allow X, the
+worker can't run X" is wrong for the safe-list commands. In particular,
+`Bash(date +%s)` in `setup-ralph/templates/settings.template.json` is
+dead weight — `date` runs regardless.
+
+### 2. Path-aware command-shape gate (stricter than `:*` suggests)
+
+`Bash(<cmd>:*)` does NOT match every suffix. The matcher rejects
+command shapes that reference paths outside `realpath(cwd)` or contain
+unexpanded `$VAR` references, even when the command name and explicit
+allow rule match. The gate is **general across multiple
+content-reading commands**, not specific to `ls`. Confirmed on
+2026-05-20:
+
+| Command | Outside cwd | Inside cwd |
+|---|---|---|
+| `ls` | Denied (`/tmp`, `/usr/bin`, `/etc`, `/home` (ancestor), `/`) | Allowed (`.`, `README.md`, `docs`, `/home/ubuntu/data/local/orchestrate-ralph`) |
+| `cat` | Denied (`/etc/issue`) | Allowed (`/home/.../README.md`) |
+| `head` | Denied (`/etc/issue`) | (pattern fits) |
+| `tail` | Denied (`/etc/issue`) | (pattern fits) |
+| `grep` | Denied (`grep ubuntu /etc/passwd`) | Allowed (`grep -l permission /home/.../docs/permission-matcher-tests.md`) |
+| `find` | Denied (`find /tmp …`) | Allowed (`find /home/.../docs -name "*.md"`) |
+| `echo > path` | Denied (`echo hello > /tmp/x`) | (not probed) |
+| **`test`** | **Allowed** (`test -f /etc/issue`, `test -r /etc/shadow`, `test -f /etc/passwd && echo yes`) | Allowed |
+
+Plus the `$VAR` shape:
+
+- `echo $HOME` — Denied
+- `echo \$HOME` — Allowed
+
+The gate fires on any literal absolute path not contained by
+`realpath(cwd)` — ancestor paths like `/home` are rejected too, not
+just sibling paths — and on any token starting with `$` that the
+shell would expand. Quoting alone does not suppress (`echo "$HOME"`
+would presumably still be Denied, untested), but escaping the `$` does.
+
+**`test` is the one exception observed.** It can stat any absolute
+path. The pattern that fits: the gate applies to commands that read
+or write file *content*; `test` only reads file *metadata*, so it
+slips through. This is consistent with what a security-aware matcher
+would do, but it means a worker can confirm the existence and
+permissions of arbitrary paths even under the strictest allowlist.
+Doctrine should note this if any guarantee is being made about
+"worker can't see outside its worktree."
+
+Doctrine impact: the "Bash command shape" passages in `ORCHESTRATOR.md`
+and `PROMPT.md` describe a coarse prefix matcher. The real matcher is
+finer-grained and *also* enforces a path-locality rule that the
+doctrine doesn't mention. Two follow-ups for the doctrine:
+
+- Describe the path-locality gate explicitly so workers know that
+  `cat /etc/passwd` won't be reachable through `Bash(cat:*)`.
+- Stop relying on the "any positional arg works" reading of `:*` —
+  it doesn't hold for paths outside the worktree.
+
+### 3. Command substitution stays denied (good news for the doctrine)
+
+E5/E6 confirmed: `$(...)` and backtick wrappers do not bypass the
+matcher. `echo $(whoami)` was Denied even though both `echo` (via the
+explicit allow rule) and `whoami` (via the built-in safe list) are
+individually permitted. Subshell expansion is treated as a distinct
+shape and rejected.
+
+This is the assumption that mattered most for the orchestrator's
+worker-isolation story; it holds.
 
 ## Updating this doc
 
