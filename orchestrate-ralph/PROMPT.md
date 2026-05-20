@@ -74,10 +74,9 @@ need is genuinely blocked, stop and leave a failure note rather than
 re-shaping the command.
 
 **Bash command shape.** Bash calls go through a permission matcher that
-allowlists *specific command shapes*. It treats a compound expression as a
-distinct pattern from its parts, so a compound prompts — and in an unattended
-run, **fails** — even when every piece is individually allowlisted. Keep every
-call to a single bare command:
+allowlists *specific command shapes*. A compound expression is a distinct
+pattern from its parts, so it **fails** even when every piece is individually
+allowlisted. Keep every call to a single bare command:
 
 - **One command per `Bash` call.** No `&&` / `||` / `;` chains, no pipes (`|`),
   no subshells, no redirects (`>`, `>>`, `<`, `2>&1`), no `for` loops, no

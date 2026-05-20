@@ -338,15 +338,15 @@ A worker outcome is one of:
   **not retried**. That is the worker's considered judgment; re-running just
   re-derives the same blocker. Escalate it (step 8).
 
-**A permission-denied worker does not halt the loop.** If a worker's `Agent`
-call comes back as an error — in particular a permission rejection carrying
-*"STOP what you are doing and wait for the user"* — that instruction is
-addressed to the **worker**, not to you. It means that one worker hit a blocked
-command and stopped; it is an ordinary **Failure**. Do **not** halt. Merge the
-workers that succeeded, write the failed worker's note yourself, retry its
-issue. If a denial *does* halt you anyway, step 1 recovers the wave on
-re-entry. Either way, **record the exact blocked command string** from the
-rejection — a config-shaped halt summary quotes it (see "Stop conditions").
+**A permission-denied worker does not halt the loop.** A worker that fails on
+a blocked command — auto-denied under `dontAsk`, or a prompt-rejection
+carrying *"STOP what you are doing and wait for the user"* under `default`
+mode — is an ordinary **Failure**. The "STOP" text, when it appears, is
+addressed to the **worker**, not to you. Do **not** halt. Merge the workers
+that succeeded, write the failed worker's note yourself, retry its issue. If
+a denial *does* halt you anyway, step 1 recovers the wave on re-entry. Either
+way, **record the exact blocked command string** from the rejection — a
+config-shaped halt summary quotes it (see "Stop conditions").
 
 **Retry budget** — an issue carrying `RETRY_BUDGET + 1` failure notes is
 exhausted: transition it to `needs-info`, escalate it (step 8), and count it
