@@ -31,7 +31,9 @@ falsified assumptions must be removed, not just demoted.
 
 The matcher applies to a session that **loaded a `.claude/settings.local.json`
 at startup**. Setup is identical to the orchestrate-ralph happy path
-(ADR 0004):
+(ADR 0004). For a worked example with multi-session swap-and-restart
+and minimal-allowlist probe configurations, see
+[`probes/group-m-runbook.md`](probes/group-m-runbook.md).
 
 1. **Pick a worktree** (`git worktree add` somewhere disposable).
 2. **Place a probe `.claude/settings.local.json`** — start from
@@ -94,8 +96,8 @@ assumption; the doc is most useful once each row has a result.
 | 9 | The `PreToolUse` path-guard hook fires for `Write` / `Edit` / `NotebookEdit` whose target resolves outside `realpath(cwd)` | `setup-ralph/templates/hook-path-guard.py`; ADR 0002 | H1–H4 | confirmed for H1–H3; H4 not run (needs `EXTRA_ALLOWED_ROOTS` edit + session restart) |
 | 10 | Glob expansion / quoting / env-var expansion in the command don't change which allow rule matches | implicit; no specific doctrine, but assumed by `Bash(echo:*)` matching `echo "hello world"` etc. | F1–F4 | falsified — F3 (`echo $HOME`) was Denied; the matcher rejects commands containing unexpanded `$VAR` references in the same shape that gets blocked for absolute external paths. Quoted strings (F1) and globs (F2) and escaped `\$` (F4) are unaffected. |
 | 11 | A command invoked by full path (e.g. `/usr/bin/git`) is "a different, unrecognised shape" and fails to match the allow rule for the bare command name | `PROMPT.md:93–94`; `ORCHESTRATOR.md:110` ("never run a command by full path") | N1–N6 | confirmed — but the rationale is sharper than the doctrine states. N5 shows the gate fires even for an absolute path **inside** the worktree, so it isn't the argument-path gate (§2) re-firing on the first token. It is a separate name-shape lookup: any `/` in the first token (`/abs/path` or `./relative`) makes the lookup miss against both the allow list and the safe list. |
-| 12 | Multi-word `:*` prefixes in allow / deny rules (`Bash(git push:*)`, `Bash(git status:*)`) match exactly the multi-word prefix plus any suffix, and do not match unrelated subcommands | `setup-ralph/templates/settings.template.json` deny block (`Bash(git push:*)`, `Bash(git fetch:*)`, etc.); template-mode prose | M1, M2, M5 | not run — load-bearing for the remote-git deny block but currently unverified. |
-| 13 | `Bash(<cmd>:*)` matches strictly the first-token command name, not arbitrary first-token text starting with `<cmd>` (i.e., the matcher tokenises on word boundary, so `Bash(rm:*)` does not match `rmdir`) | Implicit everywhere a short command is allowlisted via `:*` (`Bash(rm:*)` would be problematic if it over-matched `rmdir`); also a security-relevant property of every `Bash(<short>:*)` rule | M4 | not run — the disambiguation probe; either result has wide implications. |
+| 12 | Multi-word `:*` prefixes in allow / deny rules (`Bash(git push:*)`, `Bash(git status:*)`) match exactly the multi-word prefix plus any suffix, and do not match unrelated subcommands | `setup-ralph/templates/settings.template.json` deny block (`Bash(git push:*)`, `Bash(git fetch:*)`, etc.); template-mode prose | M1, M2, M5 | confirmed — multi-word `:*` matches the prefix plus any suffix and does not over-match unrelated subcommands, on both sides. M1/M2 cover the **deny** side (`Bash(git push:*)` denied `git push --help`; did not over-match `git status`). M5 covers the **allow** side (`Bash(git status:*)` allowed `git status --short` with no `Bash(git:*)` present to confound). |
+| 13 | `Bash(<cmd>:*)` matches strictly the first-token command name, not arbitrary first-token text starting with `<cmd>` (i.e., the matcher tokenises on word boundary, so `Bash(rm:*)` does not match `rmdir`) | Implicit everywhere a short command is allowlisted via `:*` (`Bash(rm:*)` would be problematic if it over-matched `rmdir`); also a security-relevant property of every `Bash(<short>:*)` rule | M4 | confirmed via M4 — word-boundary tokenisation, not pure literal-prefix matching. With `Bash(rm:*)` as the only allow rule, `rmdir --help` was Denied. `Bash(<short>:*)` rules are scoped to the exact command name as intended. |
 
 ## Test catalog
 
@@ -260,11 +262,11 @@ where the matcher unexpectedly Allows.**
 
 | ID | Allow / Deny | Command | Expected | Empirical |
 |---|---|---|---|---|
-| M0 | (no allow rule for `rmdir`) | `rmdir --help` | Denied | not run — precondition for M4. If `rmdir` is on the safe list, M4 cannot be interpreted and a different pair (or M0 setup) is needed. |
-| M1 | deny `Bash(git push:*)`, allow `Bash(git:*)` | `git push --help` | Denied | not run — needs the remote-git deny block plus `Bash(git:*)`. Confirms multi-word deny matches a `git push <suffix>` shape. `--help` is a no-op. |
-| M2 | same | `git status` | Allowed | not run — confirms multi-word deny doesn't over-match unrelated `git` subcommands. Read-only. |
-| M4 | allow `Bash(rm:*)` only (no other rule for `rmdir`) | `rmdir --help` | Denied if word-boundary tokenisation; Allowed if pure literal prefix matching | not run — **the disambiguation probe.** Either result has consequences for every `Bash(<short>:*)` rule shipped. `rmdir --help` is a no-op. |
-| M5 | allow `Bash(git status:*)` only | `git status --short` | Allowed | not run — confirms multi-word allow accepts suffix args. Read-only. |
+| M0 | (no allow rule for `rmdir`) | `rmdir --help` | Denied | Denied (2026-05-20) — precondition for M4 holds; `rmdir` is not on the safe list. |
+| M1 | deny `Bash(git push:*)`, allow `Bash(git:*)` | `git push --help` | Denied | Denied (2026-05-20) — multi-word deny `Bash(git push:*)` matches a `git push <suffix>` shape. |
+| M2 | same | `git status` | Allowed | Allowed (2026-05-20) — multi-word deny does not over-match unrelated `git` subcommands. |
+| M4 | allow `Bash(rm:*)` only (no other rule for `rmdir`) | `rmdir --help` | Denied if word-boundary tokenisation; Allowed if pure literal prefix matching | Denied (allow rule missing) (2026-05-20) — word-boundary tokenisation confirmed; `Bash(rm:*)` does not over-match `rmdir`. With M0 having established `rmdir` is not on the safe list, the only Allow path would have been pure-prefix over-match by `Bash(rm:*)`; that did not fire. |
+| M5 | allow `Bash(git status:*)` only | `git status --short` | Allowed | Allowed (2026-05-20) — Session C's allow list contained only `Bash(git status:*)` (no `Bash(git:*)`), so the Allowed outcome attributes unambiguously to the multi-word rule. |
 
 **Known limit:** the catalog does not probe whether a multi-word allow
 like `Bash(git status:*)` over-matches a *similar* shape such as
