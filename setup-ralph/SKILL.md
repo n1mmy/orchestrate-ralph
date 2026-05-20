@@ -64,9 +64,17 @@ Walk the user through these one at a time — present, get an answer, move on:
   allowlist entry becomes a clean failure the loop handles instead of a
   stalled prompt. The alternative **`default`** prompts your interactive
   session — better when you are actively watching a single-issue run and want
-  to approve ad-hoc commands on the fly. Either way, the gate and
-  env-bootstrap commands still need allow entries (above); mode only changes
-  what happens for everything *else*. Present both, default `dontAsk`.
+  to approve ad-hoc commands on the fly. Either way, the gate, env-bootstrap,
+  and tracker commands still need allow entries (above and below); mode only
+  changes what happens for everything *else*. Present both, default `dontAsk`.
+- **Tracker writes** — note (no user choice here, just an FYI) that the
+  orchestrator handles every tracker write itself since ADR 0006, so
+  `.ralph/settings.json` will gain the tracker's read **and** write verbs
+  (e.g. `gh issue edit`, `gh issue comment` for GitHub). The exact set is
+  derived from the tracker detected in step 1 and shown in the
+  `.ralph/settings.json` preview before writing. Workers under doctrine
+  call only the read verbs; the shared allow list grants both because the
+  file is shared (ADR 0004).
 
 ### 3. Write
 
@@ -74,16 +82,41 @@ Walk the user through these one at a time — present, get an answer, move on:
   filled in with the answers from step 2.
 - **`.ralph/settings.json`** — from
   [templates/settings.template.json](./templates/settings.template.json), with
-  one allow entry per distinct gate command **and one for the env-bootstrap
-  command** (step 2), if there is one — every worker runs that bootstrap in
-  its own worktree under this allowlist, so it needs an entry just like a gate
-  command. (The orchestrator also runs the bootstrap, but in its own attended
-  session, where an unlisted command merely prompts the watching user.) Each
-  entry is the **whole command** as a `:*` prefix — `Bash(pnpm typecheck:*)`,
-  `Bash(bash check.sh:*)`, `Bash(cp .env.example .env:*)` — never just its
-  first token. `Bash(bash *)` or `Bash(pnpm *)` would let a worker run
-  `bash -c '<anything>'` or `pnpm dlx <anything>`: arbitrary code, not the
-  gate. Set `permissions.defaultMode` to the choice from step 2 (default
+  three groups of additions:
+
+  1. **One allow entry per distinct gate command**. Each as the **whole
+     command** as a `:*` prefix — `Bash(pnpm typecheck:*)`,
+     `Bash(bash check.sh:*)`, `Bash(cp .env.example .env:*)` — never just
+     its first token. `Bash(bash *)` or `Bash(pnpm *)` would let a worker
+     run `bash -c '<anything>'` or `pnpm dlx <anything>`: arbitrary code,
+     not the gate.
+  2. **One entry for the env-bootstrap command** (step 2), if there is one —
+     every worker runs that bootstrap in its own worktree under this
+     allowlist, so it needs an entry just like a gate command. The
+     orchestrator also runs the bootstrap; one shared `.ralph/settings.json`
+     applies to both since ADR 0004.
+  3. **Tracker verbs** — per ADR 0006, the orchestrator handles every
+     tracker write itself, so `.ralph/settings.json` needs the verbs for
+     **both** worker-side reads and orchestrator-side writes. Pick the
+     block matching the tracker chosen in step 2:
+
+     - **local-markdown** — no extra entries. Reads use `Read`; writes use
+       `Edit` + `Bash(git:*)` (committing the transition commit on the
+       integration branch). All four are already in the template.
+     - **GitHub** — add `Bash(gh issue list:*)` (orchestrator discover),
+       `Bash(gh issue view:*)` (worker + orchestrator read),
+       `Bash(gh issue edit:*)` (orchestrator transition),
+       `Bash(gh issue comment:*)` (orchestrator comment).
+     - **GitLab** — add `Bash(glab issue list:*)`,
+       `Bash(glab issue view:*)`, `Bash(glab issue update:*)`,
+       `Bash(glab issue note:*)`.
+     - **Other** — write the four verbs (discover, read, transition,
+       comment) the tracker's CLI uses, each as a whole-command `:*`
+       prefix. The split between worker-read and orchestrator-write
+       still applies as doctrine; the allow list grants both because the
+       file is shared.
+
+  Set `permissions.defaultMode` to the choice from step 2 (default
   `dontAsk`). Show the user the final file before writing.
 - **`.ralph/hook-path-guard.py`** — copy
   [templates/hook-path-guard.py](./templates/hook-path-guard.py) verbatim. It

@@ -20,12 +20,12 @@ no `Bash` is needed at all.
 2. **You are on a clean, dedicated integration branch — ideally in a separate
    worktree.** The branch you are on becomes the integration branch: workers
    branch off it, merges land on it, and `git reset --hard` may run on it
-   (revert-and-serialize). So it must not be the repo's default branch
-   (`main` / `master`), the working tree must be clean, and it should be a
-   branch the user is happy to hand back. A fresh `git worktree` satisfies all
-   of this and keeps the run off the user's primary checkout — strongly
-   preferred. If you are in the primary checkout, stop and ask before
-   proceeding.
+   (the recovery flow rolls back failing merges). So it must not be the
+   repo's default branch (`main` / `master`), the working tree must be
+   clean, and it should be a branch the user is happy to hand back. A fresh
+   `git worktree` satisfies all of this and keeps the run off the user's
+   primary checkout — strongly preferred. If you are in the primary
+   checkout, stop and ask before proceeding.
 
 ## Session setup — placement and restart
 

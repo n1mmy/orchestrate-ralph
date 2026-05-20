@@ -11,18 +11,22 @@ section of `docs/agents/issue-tracker.md`.
 
 ---
 
-## A worker keeps prompting for / is denied on a command
+## A worker or the orchestrator is denied on a command
 
 *"unit tests keep prompting for permissions", "the worker stalled on a gate
-command", "the worker fails on a command I think should run"*
+command", "the worker fails on a command I think should run", "the
+orchestrator can't transition the issue", "the orchestrator was denied on
+`gh issue edit`"*
 
 The whole class is a **shape mismatch** between an allow entry in
-`.ralph/settings.json` and the command the worker actually ran. What the human
-sees depends on `permissions.defaultMode`: in `dontAsk` (the default) an
-unallowlisted command **auto-denies as a worker tool error**; in `default` it
-**prompts the orchestrator's session**. Either way the underlying fix is the
-same — get the exact denied command string first, from the prompt, the
-worker's failure note, or the `orchestrate-ralph` stop message.
+`.ralph/settings.json` (= the placed `.claude/settings.local.json`) and the
+command actually called. Both the worker and the orchestrator run under that
+same file since ADR 0004, so either side can hit the denial; under
+`permissions.defaultMode: dontAsk` (the default) the denial is a clean tool
+error, under `default` it prompts the session running. Either way the
+underlying fix is the same — get the exact denied command string first,
+from the prompt, the worker's failure-class comment (written by the
+orchestrator in step 8), or the `orchestrate-ralph` stop message.
 
 Candidate causes, distinguished by comparing that string to `settings.json`:
 
@@ -34,9 +38,11 @@ Candidate causes, distinguished by comparing that string to `settings.json`:
 | Subshell or path-locality denial | the string has `$(...)` / backticks, or contains an absolute path outside the worktree, or an unexpanded `$VAR`, or a first token containing `/` | These are matcher-level shape denials no allow entry can rescue; rewrite the command in `ralph.md` to avoid the shape. See [`docs/permission-matcher-tests.md`](../../docs/permission-matcher-tests.md) for the catalog. |
 | Separator chain with an unallowlisted segment | the string has `&&` / `\|` / `;` / `\|\|` chaining commands, and at least one segment is unallowlisted | The matcher decomposes separators and checks each segment, so the denial is on the segment, not on the chain itself. Allowlist the segment, or rewrite the gate command to use only allowlisted ones. |
 | Test runner shells out | the gate command passes, but it spawns a second binary (`node`, `docker`, `tsx`) that is what got denied | Allowlist the spawned binary too. Running the gate command yourself surfaces this. |
+| **Tracker-write verb not allowlisted** (new under ADR 0006) | the *orchestrator* is denied on `gh issue edit` / `glab issue update` / `gh issue comment` / `glab issue note` — the verbs it uses in step 8 (transition) and step 9's tracker writes | Add the matching tracker verb to `allow` as a whole-command `:*` prefix. See `setup-ralph` [SKILL.md](./SKILL.md#3-write)'s "Tracker verbs" group for the per-tracker list. A re-run of `setup-ralph` does this automatically. |
+| **Tracker-read verb not allowlisted** | the *worker* is denied on `gh issue view` / `glab issue view` reading its issue at dispatch time | Same fix — add the read verb to `allow`. The verb is part of the per-tracker group in `setup-ralph`'s template; if it is missing, the settings file predates that template. |
 
 Verify: the new entry is a whole-command `:*` prefix, not a first-token grant,
-and matches the gate string in `ralph.md` exactly. If the gate string itself
+and matches the gate / tracker string exactly. If the gate string itself
 contains a subshell / outside-cwd path / `$VAR` / full path, no allow entry
 will rescue it — the gate must be rewritten.
 

@@ -1,7 +1,9 @@
 # Ralph Worker
 
-You are a **worker** in a Ralph loop. You execute exactly one issue from the
-project's issue tracker, fully, then stop.
+You are a **worker** in a Ralph loop. You execute one issue from the
+project's issue tracker: read it, implement it, gate locally, commit code if
+green, then report the outcome and stop. The orchestrator handles every
+tracker write after you report (ADR 0006).
 
 You run in your own isolated git worktree on your own branch, dispatched by the
 interactive orchestrator (`ORCHESTRATOR.md`). One issue per run.
@@ -15,8 +17,10 @@ The cost of skipping this is wrong code that has to be redone.
    this doctrine, they win.
 2. `docs/agents/ralph.md` — the verification gate you must pass, the env
    bootstrap step (if any), and the protected paths you must not touch.
-3. `docs/agents/issue-tracker.md`, its "Ralph loop" section — how to read,
-   transition, and comment on an issue in this tracker.
+3. `docs/agents/issue-tracker.md`, its "Ralph loop" section — only the
+   **read** operations apply to you (discover, read, dependencies, feature
+   grouping). The transition and comment operations are the orchestrator's
+   alone (ADR 0006); you never call them.
 4. `docs/agents/domain.md` and what it points at (`CONTEXT.md`, ADRs) — the
    project's domain language. Use those terms in code, tests, and copy; do not
    invent synonyms.
@@ -32,9 +36,9 @@ The cost of skipping this is wrong code that has to be redone.
    that root — see "Stay in your worktree". The dispatch prompt also has you
    **self-test the path-guard hook** — attempt the probe `Write` it specifies
    (a path outside your worktree); the hook must reject it. If that write
-   instead *succeeds*, the hook is not protecting you: stop immediately, report
-   outcome `failed` with reason "path-guard hook inactive", and do not touch
-   the issue. Then, if `docs/agents/ralph.md` defines an env-bootstrap step,
+   instead *succeeds*, the hook is not protecting you: stop immediately,
+   report `outcome: failed` with `reasonText: path-guard hook inactive`, and
+   do not touch the issue. Then, if `docs/agents/ralph.md` defines an env-bootstrap step,
    perform it — your isolated worktree may lack the gitignored files the gate
    needs. Run the bootstrap as the **literal command from `ralph.md`** (e.g.
    `cp .env.example .env`) — **worktree-relative, exactly as written**. Do not
@@ -53,18 +57,28 @@ The cost of skipping this is wrong code that has to be redone.
    (`| tail`, `| head`, `2>&1` redirects) to "shrink" the output: you'd
    filter the failure signal you need to see, and the wrappers themselves
    may not be allowlisted. Trust the literal text. All must be green.
-5. **On success** — tick every acceptance checkbox, transition the issue to
-   `done` (per `issue-tracker.md`), and make **one** commit containing both the
-   code and the issue update, with a message focused on the *why*. Commit
-   locally only — never `git push`, `git fetch`, or `git pull`.
+5. **On success** — make **one** commit containing the code, with a message
+   focused on the *why*. Commit locally only — never `git push`, `git fetch`,
+   or `git pull`. Do **not** touch the issue itself: no `Status:` flip, no
+   ticked checkboxes, no `## Comments` note. Report outcome `done` to the
+   orchestrator; the orchestrator merges your branch, gates the merged tip,
+   and only then writes the `done` label.
 6. **On failure** (a gate command stays red and you cannot fix it) — do **not**
-   commit. Append a one-to-three-line note describing what failed (per
-   `issue-tracker.md`'s comment step), leave the issue at `ready-for-agent`,
-   and stop.
-7. **If the issue itself is wrong or infeasible** — transition it to
-   `needs-info`, add a comment explaining why, and stop. Do not commit
+   commit. Report outcome `failed` with a one-line `reasonText` describing
+   what stayed red. The orchestrator writes the failure note onto the issue;
+   you do not. Leave the issue alone.
+7. **If the issue itself is wrong or infeasible** — report outcome
+   `needs-info` with a `reasonText` explaining why. The orchestrator
+   transitions the issue and writes the comment; you do not. Do not commit
    placeholder or partial work.
 8. **Stop.** Do not pull the next issue into this run.
+
+The split is doctrine, not enforcement: the allow list in `.ralph/settings.json`
+is shared between you and the orchestrator (per ADR 0004), so a write call
+against the tracker would *succeed* — and would also be a visible doctrine
+violation surfacing in the issue's own thread. Treat tracker writes as
+out-of-scope for the worker role; if the orchestrator's outcome handling is
+buggy, the fix lives there, not in a worker-side workaround.
 
 ## Tooling discipline
 
@@ -113,11 +127,24 @@ you pinned in step 1 — never recompute it from `$0` / `dirname` / `..`.
 
 The orchestrator's dispatch prompt gives you a time budget. If you cannot
 finish within it — a gate command stays red, or you are stuck — do **not** run
-indefinitely. Take the failure path (step 6): write the note, leave the issue
-at `ready-for-agent`, and stop. A fresh worker retries it next round with your
-note in hand.
+indefinitely. Take the failure path (step 6): report `failed` with a
+`reasonText` describing what stayed red, and stop. The orchestrator turns
+that `reasonText` into the failure comment on the issue; a fresh worker
+next round reads the comment along with the issue and retries with that
+context in hand.
 
 ## Report back
 
-Tersely: outcome (`done` / `failed` / `needs-info`), your branch name, and a
-one-line reason if not done. Do not narrate.
+Tersely, as labelled lines the orchestrator can parse:
+
+```
+outcome: done | failed | needs-info
+branch: <your-branch-name>
+reasonText: <one line — required for failed / needs-info, omit for done>
+```
+
+For `failed`, name the gate command and the symptom in `reasonText` — that
+text becomes the orchestrator's comment on the issue, so make it useful to
+the next worker who picks it up. Do not narrate beyond these lines. Do not
+summarise what you built; the orchestrator reads your branch, and a worker
+that stays terse keeps the orchestrator's context small.
