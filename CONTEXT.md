@@ -29,7 +29,65 @@ placement** achieves the same enforcement without the architectural cost.
 
 `ORCHESTRATOR.md` uses **wave** (the set of workers dispatched together)
 and **round** (one full step-1-to-step-8 pass) almost interchangeably.
-A round contains exactly one wave; they share a clock.
+A round contains exactly one wave; they share a clock. A round has a
+sequence of phases (see "Round phases" below); the wave is the first
+two phases (dispatch + collect).
+
+## Round phases
+
+A round runs in order: **dispatch** → **collect** → **merge** → **gate** →
+**transition** → (**recover** if gate red). The orchestrator owns every
+phase from merge onwards; workers only participate in dispatch and
+collect.
+
+- **Dispatch** — orchestrator discovers eligible issues per the tracker,
+  spawns one worker per issue with `isolation: "worktree"`.
+- **Collect** — orchestrator awaits worker outcomes:
+  `{ outcome: done | failed | needs-info, reasonText?: string }`.
+  Workers do not write to the tracker; their report is the only output.
+- **Merge** — orchestrator attempts a git merge of each `done`-reporting
+  worker's branch into the integration tip. Conflicts are per-issue
+  failures (comment + leave at `ready-for-agent`), not round failures.
+- **Gate** — orchestrator runs the project gate **once** on the
+  post-merge integration tip. This is the only gate the orchestrator
+  runs in the normal path.
+- **Transition** — on gate green, the merged subset's issues are
+  labelled `done`; per-issue `needs-info` and `failed` outcomes from
+  collect get their respective writes (or no-op). Comments are written
+  here too — failure-reason text from worker reports, conflict notes
+  from merge, recovery breadcrumbs from recover.
+- **Recover** — runs only when the merge-tip gate goes red. The
+  orchestrator reverts to the pre-wave tip, re-gates each merged branch
+  alone, **boots** any whose individual gate now fails, then re-tries
+  the merge with **survivors** (the branches that passed the per-branch
+  re-gate). If the survivor-merge still fails the gate, one pass of
+  leave-one-out tries each (S-1)-subset; if none pass, a singleton
+  fallback merges one survivor, gates that merge, and labels on green —
+  typically making at least one issue's worth of progress per round
+  (a flake or environment drift at the singleton gate can still
+  produce a no-progress round). No subset sizes between 1 and S-1 are
+  explored. Every label-writing step follows `merge → gate → label`.
+  See ADR 0006 for the full algorithm.
+
+## Write authority
+
+- **Worker reads only.** Workers `Read` the issue (via `gh issue view`
+  for out-of-band trackers, or `Read` on the file for in-band) and
+  `Write` only repo files (not tracker files). Worker output is the
+  outcome report returned to the orchestrator; by doctrine the worker
+  never flips a label, posts a comment, or edits an issue file.
+- **Orchestrator owns all tracker writes.** Labels, status fields,
+  comments — every write that changes the tracker's state happens in
+  the orchestrator's transition phase, post-merge and post-gate. The
+  implementation surface differs per tracker (API calls for GitHub /
+  GitLab; file edits + commits for local-markdown), but the authority
+  is uniform.
+
+The allowlist in `.claude/settings.local.json` is shared between worker
+and orchestrator (per ADR 0004); the split above is prose discipline,
+not permission enforcement. Both can technically call any verb the file
+allows (e.g. `gh issue edit` for GitHub); doctrine constrains the
+worker to read verbs only. See ADR 0006.
 
 ## Permission environments
 
