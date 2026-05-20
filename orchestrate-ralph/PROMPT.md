@@ -48,7 +48,11 @@ The cost of skipping this is wrong code that has to be redone.
    to need that, stop and leave a note instead.
 3. **Write tests** per the repo's testing conventions.
 4. **Verify.** Run every command in the gate from `docs/agents/ralph.md`, in
-   order. All must be green.
+   order, **exactly as written** — one `Bash` call per command, bare and
+   unmodified. No `env -i …` / `nice` / `timeout` wrappers; no `2>&1`; no
+   `| tail` / `| head` pipes to shrink output. Reconstructing the gate is
+   what makes it fail the allowlist; trust the literal text. All must be
+   green.
 5. **On success** — tick every acceptance checkbox, transition the issue to
    `done` (per `issue-tracker.md`), and make **one** commit containing both the
    code and the issue update, with a message focused on the *why*. Commit

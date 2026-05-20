@@ -500,8 +500,13 @@ In the integration worktree, on the integration branch, after all of the
 wave's merges have run. First perform the env-bootstrap step from
 `docs/agents/ralph.md`, if any — the **literal command, worktree-relative**,
 run in this integration worktree, never with reconstructed absolute paths.
-Then run, as separate bare commands, each command in the gate from
-`docs/agents/ralph.md`, in order.
+Then run each command in the gate from `docs/agents/ralph.md`, **in order,
+exactly as written** — one `Bash` call per command, bare and unmodified. No
+`env -i …` / `nice` / `timeout` / `xargs` wrappers. No `2>&1` / `>`
+redirects. No `| tail` / `| head` / `| grep` pipes to shrink or filter output
+— truncation is your job after the fact, not the command's. Reconstructing
+the gate (clean env, hermetic mode, terse output) is what makes it fail the
+allowlist in the first place; trust the literal text.
 
 Read only pass/fail and (on red) the first failure. Do not fix anything; do not
 commit. Green → next round; red → revert-and-serialize (step 7).
