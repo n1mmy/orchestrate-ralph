@@ -14,12 +14,15 @@ section of `docs/agents/issue-tracker.md`.
 ## A worker keeps prompting for / is denied on a command
 
 *"unit tests keep prompting for permissions", "the worker stalled on a gate
-command"*
+command", "the worker fails on a command I think should run"*
 
 The whole class is a **shape mismatch** between an allow entry in
-`.ralph/settings.json` and the command the worker actually ran. Get the exact
-denied command string first — from the permission prompt, the worker's failure
-note, or the `orchestrate-ralph` stop message.
+`.ralph/settings.json` and the command the worker actually ran. What the human
+sees depends on `permissions.defaultMode`: in `dontAsk` (the default) an
+unallowlisted command **auto-denies as a worker tool error**; in `default` it
+**prompts the orchestrator's session**. Either way the underlying fix is the
+same — get the exact denied command string first, from the prompt, the
+worker's failure note, or the `orchestrate-ralph` stop message.
 
 Candidate causes, distinguished by comparing that string to `settings.json`:
 
@@ -92,6 +95,27 @@ The per-worker self-test found the path-guard hook is not enforcing. This is a
 |---|---|---|
 | `parallel-safe: true` but no real dependency relation | workers collide because issues that depend on each other ran in one wave | Set `parallel-safe: false` in `ralph.md` — the loop runs serially, which is always correct. |
 | `parallel-safe: false` but the tracker *does* expose dependencies | the loop runs serially and slowly though `Blocked by` is available | Set `parallel-safe: true` after confirming the tracker's dependency relation is readable. |
+
+---
+
+## Switch the worker permission mode
+
+*"workers keep interrupting me to approve commands", "workers fail silently
+and I'd rather they ask"*
+
+A user preference, not a defect. `.ralph/settings.json`'s
+`permissions.defaultMode` controls what a worker does on a command not in the
+allow list: `dontAsk` (the default) auto-denies as a tool error the worker
+can branch on — best for AFK and parallel-wave runs; `default` prompts the
+operator's session — better when actively babysitting a single-issue run.
+
+| Symptom | Fix |
+|---|---|
+| Operator wants fewer interruptions | Set `permissions.defaultMode` to `"dontAsk"`. |
+| Operator wants to approve ad-hoc commands on the fly | Set `permissions.defaultMode` to `"default"`. |
+
+Either way, the gate and env-bootstrap commands still need explicit allow
+entries — `defaultMode` only changes the *fallback* behaviour.
 
 ---
 

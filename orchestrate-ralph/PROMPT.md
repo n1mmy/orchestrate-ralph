@@ -36,7 +36,12 @@ The cost of skipping this is wrong code that has to be redone.
    outcome `failed` with reason "path-guard hook inactive", and do not touch
    the issue. Then, if `docs/agents/ralph.md` defines an env-bootstrap step,
    perform it — your isolated worktree may lack the gitignored files the gate
-   needs.
+   needs. Run the bootstrap as the **literal command from `ralph.md`** (e.g.
+   `cp .env.example .env`) — **worktree-relative, exactly as written**. Do not
+   reconstruct it with absolute paths from your pinned root; the pinned root
+   is for checking that paths *resolve* under it, not for prepending to every
+   command. Absolute paths into the repo break the worktree-relative-paths
+   rule below.
 2. **Implement the issue.** Follow its "What to build" literally and satisfy
    every acceptance criterion. Keep scope lean — no abstractions, defensive
    machinery, or features beyond what the issue requires. If the issue seems
@@ -69,10 +74,9 @@ need is genuinely blocked, stop and leave a failure note rather than
 re-shaping the command.
 
 **Bash command shape.** Bash calls go through a permission matcher that
-allowlists *specific command shapes*. It treats a compound expression as a
-distinct pattern from its parts, so a compound prompts — and in an unattended
-run, **fails** — even when every piece is individually allowlisted. Keep every
-call to a single bare command:
+allowlists *specific command shapes*. A compound expression is a distinct
+pattern from its parts, so it **fails** even when every piece is individually
+allowlisted. Keep every call to a single bare command:
 
 - **One command per `Bash` call.** No `&&` / `||` / `;` chains, no pipes (`|`),
   no subshells, no redirects (`>`, `>>`, `<`, `2>&1`), no `for` loops, no

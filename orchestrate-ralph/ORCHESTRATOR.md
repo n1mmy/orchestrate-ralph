@@ -150,9 +150,13 @@ single unallowlisted pattern, and it prompts at the very start of the run.
    placement and runs under that file — that is what carries the worker
    allowlist and the path-guard hook. You, the orchestrator, started *before*
    the placement, so you do not run under it; you operate on the attended
-   session's own permissions. If the placement has not happened, worker `Bash`
-   calls will stall on prompts. If you see a worker denied on a gate command,
-   this is why — surface it and stop.
+   session's own permissions. Workers also run under that file's
+   `permissions.defaultMode` — typically `dontAsk`, which auto-denies any
+   command not on the allow list rather than prompting. That makes the
+   allowlist load-bearing: a missing entry becomes a worker failure, not a
+   stalled prompt. If the placement has not happened, worker `Bash` calls will
+   stall on prompts. If you see a worker denied on a gate or bootstrap
+   command, this is why — surface it and stop.
 3. **The env-bootstrap step, if any.** If `docs/agents/ralph.md` defines an
    env-bootstrap step, the gate (step 7) needs it. Each worker runs it in its
    own worktree; you run it **once, in your own integration worktree, before
@@ -334,15 +338,15 @@ A worker outcome is one of:
   **not retried**. That is the worker's considered judgment; re-running just
   re-derives the same blocker. Escalate it (step 8).
 
-**A permission-denied worker does not halt the loop.** If a worker's `Agent`
-call comes back as an error — in particular a permission rejection carrying
-*"STOP what you are doing and wait for the user"* — that instruction is
-addressed to the **worker**, not to you. It means that one worker hit a blocked
-command and stopped; it is an ordinary **Failure**. Do **not** halt. Merge the
-workers that succeeded, write the failed worker's note yourself, retry its
-issue. If a denial *does* halt you anyway, step 1 recovers the wave on
-re-entry. Either way, **record the exact blocked command string** from the
-rejection — a config-shaped halt summary quotes it (see "Stop conditions").
+**A permission-denied worker does not halt the loop.** A worker that fails on
+a blocked command — auto-denied under `dontAsk`, or a prompt-rejection
+carrying *"STOP what you are doing and wait for the user"* under `default`
+mode — is an ordinary **Failure**. The "STOP" text, when it appears, is
+addressed to the **worker**, not to you. Do **not** halt. Merge the workers
+that succeeded, write the failed worker's note yourself, retry its issue. If
+a denial *does* halt you anyway, step 1 recovers the wave on re-entry. Either
+way, **record the exact blocked command string** from the rejection — a
+config-shaped halt summary quotes it (see "Stop conditions").
 
 **Retry budget** — an issue carrying `RETRY_BUDGET + 1` failure notes is
 exhausted: transition it to `needs-info`, escalate it (step 8), and count it

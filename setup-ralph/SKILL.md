@@ -58,6 +58,15 @@ Walk the user through these one at a time — present, get an answer, move on:
   dependency relation the orchestrator can read (an issue's `Blocked by`, or
   the equivalent). Confirm from the tracker type; when unsure, default false —
   the orchestrator then runs serially, which is always correct.
+- **Worker permission mode** — how a worker handles an unallowlisted command.
+  Default **`dontAsk`** (recommended for AFK / parallel-wave runs): the
+  command auto-denies as a tool error the worker can branch on — a missing
+  allowlist entry becomes a clean failure the loop handles instead of a
+  stalled prompt. The alternative **`default`** prompts your interactive
+  session — better when you are actively watching a single-issue run and want
+  to approve ad-hoc commands on the fly. Either way, the gate and
+  env-bootstrap commands still need allow entries (above); mode only changes
+  what happens for everything *else*. Present both, default `dontAsk`.
 
 ### 3. Write
 
@@ -74,7 +83,8 @@ Walk the user through these one at a time — present, get an answer, move on:
   `Bash(bash check.sh:*)`, `Bash(cp .env.example .env:*)` — never just its
   first token. `Bash(bash *)` or `Bash(pnpm *)` would let a worker run
   `bash -c '<anything>'` or `pnpm dlx <anything>`: arbitrary code, not the
-  gate. Show the user the final file before writing.
+  gate. Set `permissions.defaultMode` to the choice from step 2 (default
+  `dontAsk`). Show the user the final file before writing.
 - **`.ralph/hook-path-guard.py`** — copy
   [templates/hook-path-guard.py](./templates/hook-path-guard.py) verbatim. It
   is the `PreToolUse` path-guard hook that `.ralph/settings.json` references —
