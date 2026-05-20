@@ -46,11 +46,23 @@ Three states:
    worktree, then run `/orchestrate-ralph` again. Claude Code loads settings
    at session startup; this session predates the placement."*
 
-2. **It exists and differs from `.ralph/settings.json`.** Fatal. A
-   pre-existing `.claude/settings.local.json` is the user's own interactive
-   allow/deny list — valuable, not stale; never overwrite, swap, or back it
-   up. Tell the user to run in a fresh worktree (the recommended location
-   anyway). **Do not suggest they delete the file.**
+2. **It exists and differs from `.ralph/settings.json`.** Never touch it
+   yourself — `.claude/settings.local.json` is normally the user's own
+   interactive allow/deny list, valuable rather than stale. `Read` it
+   first and inspect: if it is **small** (a handful of entries, no
+   orchestrate-ralph signature like `defaultMode: dontAsk`, the
+   path-guard hook, or the remote-git deny block), and the worktree is
+   otherwise fresh (clean tree on a disposable branch), it is likely
+   starter scaffolding claude auto-created in this worktree — not
+   accumulated history. In that case, halt with a *suggestion* the user
+   can take or leave: they may remove the file (`rm
+   .claude/settings.local.json`) and re-run `/orchestrate-ralph`, which
+   will place `.ralph/settings.json` and prompt for the claude restart;
+   make explicit that you are not doing this yourself because the file
+   *might* still be valuable to them. If the file is substantial — many
+   entries, or a diverged orchestrate-ralph signature — halt and tell
+   the user to run in a fresh worktree instead. Never call the file
+   stale; never offer to remove it for the user.
 
 3. **It exists and is byte-identical to `.ralph/settings.json`.** It was
    placed by an earlier run — but whether *this* claude session actually
