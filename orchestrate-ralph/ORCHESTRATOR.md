@@ -49,14 +49,32 @@ revisit.
 - That isolation covers the worker's **git branch and index only — not the
   filesystem**. A worktree is a second checkout, not a sandbox: the worker
   process shares one filesystem with the orchestrator and every other checkout,
-  and `Write` / `Bash` can write to any absolute path the OS permits. A
-  worker's *file writes* stay inside its worktree only by its own path
-  discipline — see the escape checks in step 5. Running the orchestrator in a
-  separate worktree changes only the *blast radius* of an escape, not whether
-  one can happen. The path-guard hook shipped in `.ralph/settings.json` (a
-  `PreToolUse` hook) now hard-denies `Write` / `Edit` / `NotebookEdit` outside
-  the worktree; `Bash`-mediated writes cannot be statically guarded and remain
-  covered by the command-shape doctrine and step-5 detection.
+  and `Write` / `Bash` can write to any absolute path the OS permits. Running
+  the orchestrator in a separate worktree changes only the *blast radius* of
+  an escape, not whether one can happen. Two layers of static defence catch
+  most escape shapes — the path-guard hook in `.ralph/settings.json` (a
+  `PreToolUse` hook on `Write` / `Edit` / `NotebookEdit`) hard-denies edits
+  to a path outside `realpath(<worktree>)`, and the matcher's arg-locality
+  gate denies any absolute path outside the worktree appearing in a `Bash`
+  argument. Two residual vectors are *not* statically covered, and that is
+  why step-5 detection still exists:
+  - **Bash subprocesses with constructed paths.** A build tool, codegen, or
+    test runner the worker invokes can write wherever the worker tells it
+    to — the matcher checks the `Bash` arguments, not the subprocess's own
+    file writes. A worker that hands `cargo build --target-dir
+    ../other-worktree/x` to an allowlisted `cargo` only fails the
+    arg-locality gate on the `../other-worktree/x` token *if* the literal
+    string is an absolute path; a relative climb passes the gate, and once
+    `cargo` resolves it, the subprocess writes outside. **Untracked-escape**
+    catches the post-hoc litter.
+  - **Git plumbing on shared refs.** `git update-ref refs/heads/<branch>
+    <sha>` takes a *ref name*, not a path, so arg-locality has nothing to
+    flag; the actual filesystem write happens against the main `.git/refs/`
+    that worktrees share. A worker that smuggled a commit's tip onto the
+    integration branch this way leaves nothing in its own working tree to
+    detect. **Committed-escape** is the only thing that sees it: the
+    integration tip must not have moved before the orchestrator's first
+    merge of the wave.
 - `run_in_background: true` **silently drops** that isolation — the sub-agent
   then runs in the orchestrator's own worktree on the integration branch.
   Background dispatch is therefore unusable here: parallel workers would
@@ -302,24 +320,31 @@ working tree; step 5 checks for that.
 ### 5 — Escape checks, then collect outcomes
 
 When the wave's dispatch message returns, all workers have resolved together.
-Before reading any worker's report, run two **escape checks** — `isolation:
-"worktree"` does not sandbox a worker's file writes:
+Before reading any worker's report, run two **escape checks** — these are
+detection for the two residual escape vectors the path-guard hook and the
+matcher's arg-locality gate cannot statically see (see "Harness
+assumptions"):
 
-- **Committed escape.** The integration branch's current tip must equal the
-  pre-wave tip recorded in step 2 — you have run no merge yet, and an isolated
-  worker only ever commits to its *own* branch, so the tip *cannot* have
-  advanced on its own. If it has, a worker committed onto the integration
-  branch directly: **halt** on a worktree-isolation breach (see stop
+- **Committed escape** *(detects git-plumbing on shared refs)*. The
+  integration branch's current tip must equal the pre-wave tip recorded in
+  step 2 — you have run no merge yet, and an isolated worker only ever
+  commits to its *own* branch, so the tip *cannot* have advanced on its
+  own. If it has, a worker used `git update-ref` or similar to smuggle a
+  commit onto the integration branch (a ref-name argument that arg-locality
+  could not gate): **halt** on a worktree-isolation breach (see stop
   conditions). The branch's trust is broken; do not merge on top of it.
-- **Untracked escape.** Run `git status --porcelain` and diff it against the
-  pre-wave baseline from step 2. Newly-appeared untracked files mean a worker
-  wrote project files into this checkout via an absolute or worktree-climbing
-  path (untracked, so the tip never moved and the committed-escape check
-  passed clean); files already in the baseline are pre-existing build
+- **Untracked escape** *(detects Bash-subprocess writes via constructed
+  paths)*. Run `git status --porcelain` and diff it against the pre-wave
+  baseline from step 2. Newly-appeared untracked files mean a worker
+  invoked a build tool / codegen / test runner that wrote into this
+  checkout — the matcher gated the worker's `Bash` argument, but a
+  relative-climbing or worker-constructed path resolved by the subprocess
+  itself slipped past. Files already in the baseline are pre-existing build
   artifacts, not an escape. **Not fatal:** the worker's own branch still
   carries the correct deliverable, and the escaped files are duplicate
-  litter. Record the escaping worker so step 8 can comment on its issue, and
-  continue — expect the litter to collide with that worker's merge in step 6.
+  litter. Record the escaping worker so step 8 can comment on its issue,
+  and continue — expect the litter to collide with that worker's merge in
+  step 6.
 
 Then, for each worker, read its **outcome** — the labelled lines the
 dispatch template told the worker to produce:

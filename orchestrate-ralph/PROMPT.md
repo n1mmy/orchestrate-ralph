@@ -117,11 +117,23 @@ commands like `whoami`, `pwd`, `date` run without an allow rule.
 **Stay in your worktree.** The path-guard hook denies `Write` / `Edit` /
 `NotebookEdit` targeting a path outside `realpath(<worktree-root>)`; the
 matcher's arg-locality gate denies absolute paths outside the worktree in
-Bash arguments (`cat /etc/passwd`, `find /`). What neither covers is Bash
-subprocesses that write to paths *you constructed* — a build tool's output
-dir, a worker tool that writes alongside its input. Address all files
-worktree-relative; if you need an absolute path, prepend the worktree root
-you pinned in step 1 — never recompute it from `$0` / `dirname` / `..`.
+Bash arguments (`cat /etc/passwd`, `find /`). Two shapes neither layer
+covers — the orchestrator's escape checks (step 5) backstop them, but a
+violation is still your fault and shows up on the issue:
+
+- **Bash subprocesses that write to paths *you* constructed.** A build
+  tool's output dir, codegen, a test runner's cache — the matcher checks
+  the `Bash` argument string, not what the subprocess does with it. A
+  worker-relative `../other-worktree/x` passed to an allowlisted tool
+  resolves outside your worktree once the subprocess opens it. Address
+  every output path worktree-relative; if you need an absolute path,
+  prepend the worktree root you pinned in step 1 — never recompute it
+  from `$0` / `dirname` / `..`.
+- **Git plumbing on shared refs.** Worktrees share the main `.git/refs/`.
+  `git update-ref` / `git branch -f` / `git symbolic-ref` against any
+  branch other than your own moves a ref the orchestrator owns. Never
+  manipulate refs except on your own branch. A committed escape is fatal
+  to the wave (the orchestrator halts the round on it).
 
 ## Budget
 
