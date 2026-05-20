@@ -229,3 +229,84 @@ Live run against the test repo (`~/data/local/orchestrate-ralph-run-2`):
   Forces the *user's* session into `dontAsk` for the whole interactive
   experience — a much worse UX. Subagent dispatch isolates the mode to the
   orchestrator without affecting the user's session.
+
+## Phase 1 verification — VERDICT: PLAN REJECTED
+
+Phase 1 was run in this worktree. `.claude/settings.local.json` was placed
+from `setup-ralph/templates/settings.template.json` and `.ralph/hook-path-guard.py`
+from the template, then four parallel `Agent` dispatches probed the matrix:
+
+| variant | subagent_type | isolation | cwd reported | P1 deny block (`git remote -v`) | P2 path-guard hook (Write `/tmp/...`) | P3 `dontAsk` (`whoami`) | P4 `Agent` tool present |
+|---|---|---|---|---|---|---|---|
+| V1 | `general-purpose` | (none) | **parent's cwd** | allowed silently | bubbled an interactive prompt; **no hook deny message** | allowed silently | **absent** |
+| V2 | `claude` | (none) | isolated `agent-*` | allowed silently | bubbled prompt; no hook deny | allowed silently | **absent** |
+| V3 | `general-purpose` | `worktree` | isolated `agent-*` | allowed silently | bubbled prompt; no hook deny | allowed silently | **absent** |
+| V4 | `claude` | `worktree` | isolated `agent-*` | allowed silently | bubbled prompt; no hook deny | allowed silently | **absent** |
+
+**Uniform across all four variants.** Subagent type and isolation flag are
+both empirically irrelevant to enforcement propagation.
+
+Three independent fatal findings, each on its own enough to kill the plan:
+
+1. **No subagent variant has the `Agent` tool.** The orchestrator subagent
+   literally cannot dispatch workers. The plan's three-layer architecture is
+   *structurally* impossible in this Claude Code version — there is no
+   negotiation room. (Risk #2 in this plan flagged this; it landed.)
+2. **The deny block does not propagate.** `git remote -v` ran in all four
+   variants despite `Bash(git remote:*)` being on the deny list, and *without
+   even prompting*. The plan's central enforcement premise is wrong.
+3. **`dontAsk` does not propagate.** `whoami` (not on the allowlist) ran in
+   all four without a prompt. The "no more prompts" benefit is fictional.
+
+The path-guard hook also did not fire in any variant — the `/tmp` Write was
+blocked only by a normal user-permission prompt (which `dontAsk`, had it
+propagated, would have bypassed). None of the four denials carried the
+hook's branded `"Path-guard: …"` message.
+
+### Incidental finding — `claude` subagents are isolated by default
+
+V1 (`general-purpose`, no `isolation` flag) reported the parent's cwd; V2
+(`claude`, no flag) reported an isolated `agent-*` cwd. So `claude`-type
+subagents are auto-isolated; `general-purpose` are not. This contradicts
+`ORCHESTRATOR.md`'s "Harness assumptions" line — *"Every foreground `Agent`
+call is isolated into its own throwaway git worktree, whether or not
+`isolation` is set"* — and is worth a separate doctrine update.
+
+### Handoff/probe discrepancy — needs separate re-verification
+
+`handoff.md`'s "Resolved — hook propagation to worker subagents" section
+claims a live loop run confirmed that hooks + `dontAsk` + path-guard *do*
+reach isolated workers, that the per-worker self-test fires, and that an
+outside-worktree `Write` is denied with the hook's branded message. V3 and
+V4 are the same configuration (`isolation: "worktree"`) and reproduce
+**none** of that.
+
+Three plausible explanations, in order of likelihood:
+
+1. **Harness drift.** The handoff's verification was a different Claude Code
+   version; recent updates changed propagation semantics. Several recent
+   commits in the package (`7fb4340`, `aee5d34`, the worker self-test, the
+   "write-guard hook inactive" stop condition) ride on that behaviour, so
+   this is a serious finding independent of the orchestrator-as-subagent
+   plan.
+2. **Trigger condition not isolated by Phase 1.** Possibly propagation only
+   activates when the *parent's* session itself loaded `settings.local.json`
+   at startup (i.e., the user started `claude` in a directory where the file
+   already existed). The Phase 1 parent did not.
+3. **The handoff over-claims.** What was actually verified was narrower than
+   the prose suggests.
+
+Until that is reconciled, the worker-side path-guard story is also
+unverified. The per-worker self-test in `ORCHESTRATOR.md`'s dispatch
+template is now load-bearing as the runtime check.
+
+### What stays alive
+
+- The cheap fallback the plan names — *"always re-Read `ORCHESTRATOR.md` at
+  start of each wave so stale-context is at most one wave behind"* — picks
+  up only the fresh-doctrine win. Worth doing on its own; does not depend on
+  any propagation that doesn't exist.
+- The five live-run-doctrine commits (`b535e08` through `ba5b29f`) and the
+  recent `e9cd49a` batch remain the right level of fix for the
+  misbehaviour-class. Doctrine plus live discipline is what the
+  architecture supports.

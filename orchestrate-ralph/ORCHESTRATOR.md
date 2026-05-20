@@ -40,8 +40,12 @@ The loop depends on these Claude Code behaviours. They are not a documented
 API; if a future Claude Code version changes them, this is the section to
 revisit.
 
-- Every foreground `Agent` call is isolated into its own throwaway git
-  worktree, whether or not `isolation` is set.
+- A foreground `Agent` call with `isolation: "worktree"` is isolated into
+  its own throwaway git worktree. Without the explicit flag, isolation
+  depends on `subagent_type` — `claude` and `Explore` auto-isolate;
+  `general-purpose` shares the parent's cwd. The worker dispatch template
+  (below) always sets `isolation: "worktree"` explicitly; do not rely on the
+  per-type default.
 - That isolation covers the worker's **git branch and index only — not the
   filesystem**. A worktree is a second checkout, not a sandbox: the worker
   process shares one filesystem with the orchestrator and every other checkout,
@@ -114,10 +118,11 @@ This loop works the local checkout exclusively. Neither you nor any sub-agent
 runs `git push`, `git fetch`, `git pull`, `git clone`, or `git ls-remote` —
 nothing that reaches a remote. Workers commit to their local branches; you
 merge locally; the finished integration branch is left on disk for the user to
-push. For workers this is enforced by the `deny` entries in
-`.ralph/settings.json`; for you it is **doctrine only** — you run on the
-attended session's permissions, not that file — so the rule is stated here and
-you simply never attempt it.
+push. The `deny` entries in `.ralph/settings.json` enforce this for **both**
+you and workers: this session was launched after the file was placed at
+`.claude/settings.local.json`, claude loaded it at startup, and worker
+sub-agents inherit the same enforcement. A remote-touching `git` call is a
+clean tool error, not a prompt.
 
 ## Setup prerequisites — check before starting
 
@@ -143,20 +148,20 @@ single unallowlisted pattern, and it prompts at the very start of the run.
      free. If you are in the primary checkout, stop and ask the user — proceeding
      in place is acceptable only if the two conditions above hold and the branch
      is one they are happy to hand back.
-2. **Worker permissions are in place.** The `orchestrate-ralph` skill places
-   `.ralph/settings.json` at `.claude/settings.local.json` before invoking
-   this doctrine — copying it in when absent, erroring out when a differing
-   `settings.local.json` is already there. Each worker is spawned *after* that
-   placement and runs under that file — that is what carries the worker
-   allowlist and the path-guard hook. You, the orchestrator, started *before*
-   the placement, so you do not run under it; you operate on the attended
-   session's own permissions. Workers also run under that file's
+2. **You and workers both run under the enforced permissions.** This claude
+   session was launched **after** `.ralph/settings.json` was placed at
+   `.claude/settings.local.json` — claude loaded the file at startup, so it
+   is in effect for *you*, the orchestrator. Worker sub-agents you spawn
+   inherit it one nesting level deeper. That file carries the allowlist, the
+   remote-git `deny` block, the path-guard hook, and
    `permissions.defaultMode` — typically `dontAsk`, which auto-denies any
-   command not on the allow list rather than prompting. That makes the
-   allowlist load-bearing: a missing entry becomes a worker failure, not a
-   stalled prompt. If the placement has not happened, worker `Bash` calls will
-   stall on prompts. If you see a worker denied on a gate or bootstrap
-   command, this is why — surface it and stop.
+   command not on the allow list rather than prompting. The allowlist is
+   load-bearing: a missing entry becomes a clean tool error (worker
+   `Failure`, or — for you — a halt with a config-shaped summary), not a
+   stalled prompt. If you see yourself or a worker denied on a gate or
+   bootstrap command, this is why — surface it and stop. The
+   `orchestrate-ralph` skill's session setup verifies enforcement is in
+   effect before invoking this doctrine; if you got here at all, it is.
 3. **The env-bootstrap step, if any.** If `docs/agents/ralph.md` defines an
    env-bootstrap step, the gate (step 7) needs it. Each worker runs it in its
    own worktree; you run it **once, in your own integration worktree, before
