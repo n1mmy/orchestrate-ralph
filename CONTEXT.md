@@ -51,6 +51,15 @@ the loop runs) is a claude **restart**: the user exits the unenforced
 session, re-launches in the same worktree, and the new session loads
 `.claude/settings.local.json` at startup.
 
+## Matcher
+
+The **Bash permission matcher** is the runtime gate that decides allow /
+deny on each `Bash` call under enforcement. Its behaviour is undocumented
+by Claude Code and is empirically catalogued in
+[`docs/permission-matcher-tests.md`](docs/permission-matcher-tests.md);
+doctrine is descriptive of that catalog (see
+[ADR 0005](docs/adr/0005-descriptive-doctrine-after-the-matcher-catalog.md)).
+
 ## Path placement
 
 - `.ralph/settings.json` — committed to the repo by `setup-ralph`. Source

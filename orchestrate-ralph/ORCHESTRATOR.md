@@ -100,17 +100,24 @@ Beyond those, you *may* run git plumbing that produces little output (`git log
 inspection), `date +%s` for wave timing, and read the config files named above
 and the issue tracker — always from your own integration worktree, or from a
 branch via `git show <ref>:<path>`, **never from inside a worker's worktree
-directory** (`.../agent-*/`). That is the whole of your direct surface. Prefer `Read`
-for file contents and the `Glob` / `Grep` tools for search — but native
+directory** (`.../agent-*/`). That is the whole of your direct surface. Prefer
+`Read` for file contents and the `Glob` / `Grep` tools for search — but native
 macOS/Linux Claude Code builds drop `Glob` / `Grep`, so if they are absent
 fall back to the allowlisted `rg` / `grep` / `find` (or `bfs` / `ugrep`) in
-`Bash`. Run each
-`Bash` command as its own bare call: never prefix one with `cd` (you are
-already in the integration worktree, and `cd`-before-`git` trips a safety
-prompt), never run a command by full path, and never use a compound shape —
-`&&` / `||` / `;` chains, pipes, redirects, subshells, or `for` loops. The
-permission matcher treats a compound as a distinct, unallowlisted pattern, so
-it prompts even when every constituent command is allowed.
+`Bash`.
+
+The permission matcher checks each segment of a separator-joined command
+(`&&`, `||`, `;`, `|`, `&`) against allow + deny independently — so a pipe
+between two allowlisted commands runs, and you can use one when bounded
+output matters. What denies regardless: subshells (`$(...)`, backticks);
+absolute paths outside the integration worktree in args, or any unexpanded
+`$VAR`; any first token containing `/` (`/usr/bin/git` denied even with
+`Bash(git:*)`); and the explicit denies on `cd`, `git -C`, and remote-git.
+Denials surface as clean "Denied by permissions" tool errors under
+`dontAsk`. The full empirical model is in
+[`docs/permission-matcher-tests.md`](../docs/permission-matcher-tests.md);
+the project's allow list lives in `.ralph/settings.json` (= the placed
+`.claude/settings.local.json`).
 
 ## Local git only — never contact a remote
 
@@ -126,11 +133,11 @@ clean tool error, not a prompt.
 
 ## Setup prerequisites — check before starting
 
-**Run every check below as its own bare `Bash` call.** The command-shape
-discipline above applies here especially — prerequisite checks are the most
-tempting place to break it. Never bundle them into one `echo`-labelled,
-`&&`-chained, `2>&1`-redirected command: the matcher treats that compound as a
-single unallowlisted pattern, and it prompts at the very start of the run.
+**Run every check below as its own bare `Bash` call.** Prerequisite checks
+are the most tempting place to bundle into one `echo`-labelled, `&&`-chained,
+`2>&1`-redirected command. Don't: the gain in compactness is small, and
+filtering or labelling the output here costs you the clean per-check
+signal you'd otherwise get on the first failure.
 
 1. **You are on a clean, dedicated integration branch.** The branch you are on
    becomes the **integration branch**: workers branch off it, their work merges
@@ -307,11 +314,12 @@ Then, for each worker:
   the integration branch (see the merge procedure below).
   - Clean merge → the branch is integrated. **Reap the worker's worktree** so
     it does not leak: `git worktree unlock <path>` then `git worktree remove
-    --force <path>`. Run the unlock and the remove as **separate bare `Bash`
-    calls**, one tool call each — never a `for` loop or an `&&`/`;` chain (a
-    compound shell is an unrecognised command shape and prompts). Unlock first;
-    a bare `remove` skips a locked worktree. Removal drops only the directory;
-    the worker's branch ref survives.
+    --force <path>`. Run the unlock and the remove as separate bare `Bash`
+    calls, one tool call each — a `for` loop is a subshell shape the matcher
+    denies, and even though `&&` / `;` would decompose and run, separate calls
+    give you per-step output to diagnose if either fails. Unlock first; a bare
+    `remove` skips a locked worktree. Removal drops only the directory; the
+    worker's branch ref survives.
   - Aborts citing *untracked working tree files would be overwritten* → an
     untracked escape collided with this merge. Recover with `git clean -f --
     <the paths git named>` and re-run the merge once (see the merge procedure
@@ -506,12 +514,11 @@ wave's merges have run. First perform the env-bootstrap step from
 `docs/agents/ralph.md`, if any — the **literal command, worktree-relative**,
 run in this integration worktree, never with reconstructed absolute paths.
 Then run each command in the gate from `docs/agents/ralph.md`, **in order,
-exactly as written** — one `Bash` call per command, bare and unmodified. No
-`env -i …` / `nice` / `timeout` / `xargs` wrappers. No `2>&1` / `>`
-redirects. No `| tail` / `| head` / `| grep` pipes to shrink or filter output
-— truncation is your job after the fact, not the command's. Reconstructing
-the gate (clean env, hermetic mode, terse output) is what makes it fail the
-allowlist in the first place; trust the literal text.
+exactly as written** — one `Bash` call per command, unmodified. Do not add
+`env -i` / `nice` / `timeout` / `xargs` wrappers or `2>&1` / `| tail` /
+`| head` / `| grep` filters to "shrink" the output: you'd filter the failure
+signal you need to see, and the wrappers may not be allowlisted. Truncation
+is your job after the fact, not the command's. Trust the literal text.
 
 Read only pass/fail and (on red) the first failure. Do not fix anything; do not
 commit. Green → next round; red → revert-and-serialize (step 7).

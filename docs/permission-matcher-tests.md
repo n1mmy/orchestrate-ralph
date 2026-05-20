@@ -10,7 +10,9 @@ in `orchestrate-ralph`'s doctrine depend on specific matcher behaviour
 provides the procedure to run the catalog.
 
 When an empirical result here disagrees with the doctrine, **trust the
-result and update the doctrine**.
+result and update the doctrine**. Doctrine is descriptive
+([ADR 0005](adr/0005-descriptive-doctrine-after-the-matcher-catalog.md));
+falsified assumptions must be removed, not just demoted.
 
 ## When to run
 
@@ -363,10 +365,16 @@ When you fill in an Empirical cell:
 2. Compare against the row's Expected outcome.
 3. If they differ, update the **assumptions table** at the top —
    change the Status, link to the test that falsified the assumption.
-4. Check the **doctrine surface area** for any text that depended on
-   the old behaviour. Likely places: `orchestrate-ralph/ORCHESTRATOR.md`
-   ("Bash command shape" passages), `orchestrate-ralph/PROMPT.md`
-   ("Bash command shape" section), `setup-ralph/SKILL.md` step 3,
-   the ADRs.
-5. Patch the doctrine in the same change as the test result. A
-   falsified assumption left in the doctrine becomes the next bite.
+4. **Search the doctrine surface for any text that depended on the old
+   behaviour.** Anywhere worker, orchestrator, setup, or repair prose
+   describes matcher behaviour or names specific forbidden shapes is a
+   candidate. Grep across the skill folders for matcher-related terms —
+   `compound`, `pipe`, `redirect`, `subshell`, `allowlist`, `:*`,
+   `dontAsk`, `safe list`, `arg-locality`. Doctrine that names
+   mechanisms the catalog has falsified must be updated; doctrine that
+   enumerates shapes the catalog has shown to work can be relaxed.
+5. Patch the doctrine in the same change set as the test result. A
+   falsified assumption left in the doctrine becomes the next bite —
+   especially under the descriptive frame
+   ([ADR 0005](adr/0005-descriptive-doctrine-after-the-matcher-catalog.md)),
+   where doctrine accuracy is the optimisation target.

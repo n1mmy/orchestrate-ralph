@@ -48,11 +48,11 @@ The cost of skipping this is wrong code that has to be redone.
    to need that, stop and leave a note instead.
 3. **Write tests** per the repo's testing conventions.
 4. **Verify.** Run every command in the gate from `docs/agents/ralph.md`, in
-   order, **exactly as written** — one `Bash` call per command, bare and
-   unmodified. No `env -i …` / `nice` / `timeout` wrappers; no `2>&1`; no
-   `| tail` / `| head` pipes to shrink output. Reconstructing the gate is
-   what makes it fail the allowlist; trust the literal text. All must be
-   green.
+   order, **exactly as written** — one `Bash` call per command, unmodified.
+   Do not add `env -i` / `nice` / `timeout` wrappers or extra filters
+   (`| tail`, `| head`, `2>&1` redirects) to "shrink" the output: you'd
+   filter the failure signal you need to see, and the wrappers themselves
+   may not be allowlisted. Trust the literal text. All must be green.
 5. **On success** — tick every acceptance checkbox, transition the issue to
    `done` (per `issue-tracker.md`), and make **one** commit containing both the
    code and the issue update, with a message focused on the *why*. Commit
@@ -68,69 +68,46 @@ The cost of skipping this is wrong code that has to be redone.
 
 ## Tooling discipline
 
-Follow the repo's own agent-instruction file first. Absent guidance there, the
-defaults: file contents via `Read`, edits via `Edit` / `Write`, search via the
-`Glob` / `Grep` tools when your harness has them, else `rg` / `grep` / `find`
-in Bash (see "Bash command shape"). **No remote git** — never push, fetch, or pull; the
-loop works the local checkout only, and pushing is the user's job. Verify only
-with the project's gate; do not improvise tools outside it. If a command you
-need is genuinely blocked, stop and leave a failure note rather than
-re-shaping the command.
+Follow the repo's own agent-instruction file first. Absent guidance there: file
+contents via `Read`; edits via `Edit` / `Write`; search via `Glob` / `Grep` if
+your harness has them, else `rg` / `grep` / `find` / `bfs` / `ugrep` in Bash
+(native macOS and Linux Claude Code builds drop `Glob` / `Grep`; do not assume
+they exist). To **remove** a file: `git rm <path>` if tracked, `git clean -f
+<path>` if untracked (scope to a specific path, never run `git clean` bare; add
+`-x` only for a gitignored file). To **create** a directory, `Write` a file to
+a path inside it — the parent is made for you. **No remote git**: never push,
+fetch, or pull; the loop works the local checkout only. Verify only with the
+project's gate; do not improvise tools outside it.
 
-**Bash command shape.** Bash calls go through a permission matcher that
-allowlists *specific command shapes*. A compound expression is a distinct
-pattern from its parts, so it **fails** even when every piece is individually
-allowlisted. Keep every call to a single bare command:
+**Bash command shape.** The permission matcher checks each segment of a
+separator-joined command (`&&`, `||`, `;`, `|`, `&`) against the allow list and
+deny list independently — so a pipe or chain between two allowlisted commands
+runs (`pnpm test | head -50` works if both `pnpm test` and `head` are
+allowlisted, useful when the gate's output is huge). What denies regardless of
+allow rules: subshells (`$(...)`, backticks); any argument that's an absolute
+path outside your worktree root, or contains an unexpanded `$VAR` (escape with
+`\$` for a literal); any first token containing `/` (use bare `git`, not
+`/usr/bin/git`); and the explicit denies on `cd`, `git -C`, and remote-git
+operations (`push` / `fetch` / `pull` / `clone` / `ls-remote` / `remote`).
+Denials surface as clean "Denied by permissions" tool errors under `dontAsk`
+— re-shape as a separate `Bash` call or a different command. Don't wrap with
+`env -i` / `nice` / `timeout` to "work around" a denial; those aren't
+allowlisted either, and you'd be filtering the signal you need to see from
+the gate.
 
-- **One command per `Bash` call.** No `&&` / `||` / `;` chains, no pipes (`|`),
-  no subshells, no redirects (`>`, `>>`, `<`, `2>&1`), no `for` loops, no
-  `$(cat <<EOF…)` here-doc substitutions. Split work into separate `Bash` tool
-  uses. Don't pipe gate or test output through `tail` / `head` — run the bare
-  command. For a multi-paragraph commit message, pass repeated `-m` flags.
-- **Never prefix with `cd`.** You already run in your worktree; commands
-  resolve from its root. `cd <path> && …` is a compound, and `cd`-before-`git`
-  additionally trips a safety prompt.
-- **Run commands bare, not by full path.** `git`, `pnpm`, `node` — not
-  `/usr/bin/git`; an explicit path is a different, unrecognised shape.
-- **`Glob` / `Grep` may not exist; the Bash equivalents always do.** Native
-  macOS and Linux builds of Claude Code drop the `Glob` / `Grep` tools in
-  favour of Bash search — do not assume they are present. Use them if your
-  harness offers them; otherwise search with the allowlisted `rg`, `ugrep`,
-  `grep`, `find`, or `bfs`, and read or list with `cat`, `head`, `tail`, `ls`
-  — one bare command each, never a redirect. `Read` for file contents is
-  always available; prefer it.
-- **Root every search inside your worktree** — a relative path or `.`, never
-  `/`, `~`, or an absolute path that climbs out. Scanning the whole filesystem
-  (`find / …`) is never right: it is slow, may hang you past your budget, and
-  reaches outside your worktree. A module, file, or dependency that seems
-  missing is a gate or env-bootstrap failure to note (step 6) — not something
-  to hunt for across the disk.
-- **Removing and creating files.** No bare `rm` or `mkdir`. To **remove** a
-  file, use `git`: `git rm <path>` for a tracked file, `git clean -f <path>`
-  for an untracked one — a stray file you created by mistake (add `-x` only if
-  it is gitignored). Both are allowlisted and both stay inside your worktree;
-  scope `git clean` to the specific path, never run it bare. To **create** a
-  directory, `Write` a file to a path inside it — the parent is made for you.
-  `Write` overwrites a file's contents; it cannot delete a file.
+The project's allow list and deny block live in `.ralph/settings.json`; `Read`
+it to see the exact gate-command shapes and project-specific tool grants. The
+shape rules above apply on top of the file, and a small set of read-only
+commands like `whoami`, `pwd`, `date` run without an allow rule.
 
-**Stay in your worktree.** You run in an isolated worktree; `git worktree list`
-will also show the orchestrator's checkout and other parallel workers'
-worktrees. Every path it lists except your own is off-limits — they hold the
-orchestrator's integration branch and other workers' in-progress work. Never
-`cd` into one, never target one with `git -C` or `--work-tree`, never edit or
-write a file outside your own worktree. (`cd` and `git -C` are denied outright
-in `.ralph/settings.json`; do not try to route around that — committing
-outside your worktree corrupts the run.) Read-only git queries and reading
-shared config are fine.
-
-The escape that bites in practice is subtler than `cd`: a worker constructs a
-path that *resolves* outside its worktree and writes a project file there — an
-absolute path into another checkout, or a `../..` climb past the worktree
-root. `isolation: "worktree"` does not sandbox file writes, so nothing stops
-this but discipline: **address project files only by worktree-relative
-paths.** Never build an absolute path into the repo; never climb above the
-worktree root you pinned in step 1; if you need that root, use the pinned
-value — never recompute it from `$0` or `dirname`.
+**Stay in your worktree.** The path-guard hook denies `Write` / `Edit` /
+`NotebookEdit` targeting a path outside `realpath(<worktree-root>)`; the
+matcher's arg-locality gate denies absolute paths outside the worktree in
+Bash arguments (`cat /etc/passwd`, `find /`). What neither covers is Bash
+subprocesses that write to paths *you constructed* — a build tool's output
+dir, a worker tool that writes alongside its input. Address all files
+worktree-relative; if you need an absolute path, prepend the worktree root
+you pinned in step 1 — never recompute it from `$0` / `dirname` / `..`.
 
 ## Budget
 

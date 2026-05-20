@@ -174,8 +174,11 @@ You cannot dispatch a worker, so you cannot reproduce a permission prompt.
 Verify what you can:
 
 - **Static shape check** — confirm an allowlist fix is the whole-command `:*`
-  prefix (not a first-token grant, not a compound), and that it matches the
-  exact gate command string in `docs/agents/ralph.md`.
+  prefix (not a first-token grant), and that it matches the exact gate
+  command string in `docs/agents/ralph.md`. If the gate string itself contains
+  a subshell, an absolute path outside the worktree, an unexpanded `$VAR`, or
+  a full-path invocation, no allow entry will rescue it — the gate must be
+  rewritten.
 - **Run the real command** — run the gate command yourself in the checkout to
   capture its exact invocation, and to catch a test runner that shells out to
   a second, unallowlisted binary.

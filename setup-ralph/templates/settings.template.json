@@ -21,8 +21,7 @@
       "Bash(command -v:*)",
       "Bash(which:*)",
       "Bash(test:*)",
-      "Bash(echo:*)",
-      "Bash(date +%s)"
+      "Bash(echo:*)"
     ],
     "deny": [
       "Bash(git push:*)",
