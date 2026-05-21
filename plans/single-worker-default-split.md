@@ -1,78 +1,213 @@
 # Plan — split orchestrate-ralph into single + parallel skills
 
-Implements [ADR 0007](../docs/adr/0007-single-worker-default-two-skill-split.md).
+Implements
+[ADR 0007](../docs/adr/0007-single-worker-default-two-skill-split.md);
+that ADR receives two amendments noted at the end. Supersedes the
+earlier `plan-serial-split.md` (commit 2950c01). Should be deleted
+when this plan ships.
+
+`plans/cleanup-ralph-skill.md` is unaffected — it sits alongside this
+one, on its own timeline.
+
+## Spine
+
+The mechanical bet:
+
+- **Single-worker is the canonical Ralph loop.** Doctrine reads as a
+  single-worker loop end-to-end; "wave," "MAX_PARALLEL," "merged set,"
+  "survivor" do not appear in the single skill's ORCHESTRATOR.md.
+- **Worker still runs in `isolation: "worktree"` at N=1.** This is an
+  integrity property, not a maintenance choice. The worker's branch
+  tip is the **only** channel through which work crosses to the
+  orchestrator; the worker physically cannot leave edited-but-uncommitted
+  or written-but-not-`git add`-ed files in the integration worktree to
+  silently colour the orchestrator's re-gate. The committed tip is the
+  truth. (See "Re-gate rationale" below.)
+- **Worker resets to integration tip before working** → merge step
+  survives as a trivial fast-forward; cannot conflict by construction.
+- **End-of-round `git branch -D`** for every dispatched worker, in both
+  skills. Reflog retains commits 90d. Asymmetric with `cleanup-ralph`'s
+  `-d` on purpose (orchestrator has full outcome context; cleanup-ralph
+  doesn't).
+- **`PROMPT.md` is identical across both skills** (same reset, root-pin,
+  hook self-test, report shape) — see "PROMPT.md sharing" below.
+
+## Re-gate rationale (amendment to ADR 0007)
+
+The orchestrator re-gates on the post-worker tip even though the worker
+already gated locally. Four independent vectors motivate this:
+
+1. **Working-tree residue.** A worker that edited a file but committed
+   only a subset would leave the gate green against a dirty tree.
+   Worktree isolation closes this vector at the boundary — but the
+   re-gate is what *verifies* the boundary held.
+2. **Allowlist gaps.** The worker may have had a permission the
+   orchestrator's enforced settings revoke; the re-gate runs under the
+   orchestrator's settings.
+3. **A wrapper the worker silently dropped.** If gate doctrine
+   prescribes `script/check` and the worker ran the bare tool, the
+   re-gate (using the prescribed wrapper) catches it.
+4. **Flake masked at worker stage.** A test that passed once for the
+   worker is run again from a clean tip.
+
+Recovery on red is `git reset --hard <pre-worker-tip>`; the round made
+no progress and the issue stays at `ready-for-agent` (counts toward
+retry budget).
+
+ADR 0007 should absorb this rationale (currently the ADR folds red-gate
+into the step-8 outcome row without explaining why re-gate exists at
+all).
+
+## PROMPT.md sharing — source symlink, install-time copy is fine
+
+The source repo keeps `orchestrate-ralph-parallel/PROMPT.md` as a
+relative symlink to `../orchestrate-ralph/PROMPT.md`. This is purely
+dev-time DRY for the maintainer (edit once).
+
+At install time, the relationship doesn't matter. Whether the installer
+preserves the symlink (dev `~/.claude/skills/` symlink workflow) or
+flattens it into two physical copies (zip extract, naive `cp`, Windows
+target without symlink support), both skills resolve their PROMPT.md
+locally and run. No partial-install hazard, no `cp -a` requirement, no
+prerequisite-check workaround needed.
+
+Doctrine is N-invariant, so the two installed copies (or the one
+symlinked file) carry the same content for the same reason — there is
+nothing to drift toward.
+
+## Drift-detection — recurring maintenance procedure
+
+Single-skill ORCHESTRATOR.md is **authoritative for shared mechanics**
+(prerequisites, session setup, gate procedure, transition, stop
+conditions, protected files, local-git-only, harness assumptions,
+permission matcher). Parallel-skill ORCHESTRATOR.md's matching sections
+must track.
+
+Before any release, run:
+
+1. `diff orchestrate-ralph/ORCHESTRATOR.md orchestrate-ralph-parallel/ORCHESTRATOR.md`.
+   Every difference must be **either** an N>1-specific construct
+   (wave, MAX_PARALLEL, step-9 recovery, merge ordering) **or** a
+   knowing N-shape collapse. Anything else is drift in shared
+   mechanics → reconcile by editing the parallel copy to track the
+   single copy.
+2. `diff orchestrate-ralph/SKILL.md orchestrate-ralph-parallel/SKILL.md`.
+   Same rule — only differences should be the description, the
+   `parallel-safe` prerequisite (parallel-only), and the `N` argument
+   (parallel-only).
+3. The existing handoff grep smoke test (`\.\./docs|docs/adr/|step [0-9]`)
+   continues to run over both folders.
+
+Document this procedure in the maintainer's resync section.
+
+## parallel SKILL.md description
+
+Neutral, not redirective. The user reached the parallel skill by
+explicitly invoking it — leading with "default to the serial variant"
+talks down to them.
+
+> "Run a Ralph loop in parallel-wave mode (multiple worker sub-agents
+> per round). Requires `parallel-safe: true` in `docs/agents/ralph.md`.
+> For the single-worker (canonical) loop, see `/orchestrate-ralph`."
+
+The prerequisite check + the `parallel-safe` halt message do the
+discoverability work; the description doesn't need to.
+
+## `parallel-safe` default — `false` (capability declaration)
+
+`setup-ralph` writes `parallel-safe: false` by default; the template
+comment explains it as a *capability declaration* the user affirmatively
+claims when their tracker exposes a dependency relation the
+orchestrator can read. The single skill ignores the flag entirely; the
+parallel skill requires it true.
+
+(Rejects the earlier `plan-serial-split.md` proposal of `true`-by-default
+with a comment-to-flip-false — that framing is coherent only under a
+"hard-veto" reading of the flag, which ADR 0007's capability framing
+replaces.)
 
 ## Touch list
 
 | File | Action |
 |---|---|
 | `orchestrate-ralph/ORCHESTRATOR.md` | Rewrite for single-worker; aggressive pruning |
-| `orchestrate-ralph/SKILL.md` | Update description; point at `/orchestrate-ralph-parallel` |
-| `orchestrate-ralph/PROMPT.md` | No change |
-| `orchestrate-ralph-parallel/ORCHESTRATOR.md` | New: verbatim copy of *current* `orchestrate-ralph/ORCHESTRATOR.md` |
-| `orchestrate-ralph-parallel/SKILL.md` | New: parallel-specific description + `parallel-safe` prerequisite + `N` argument |
+| `orchestrate-ralph/SKILL.md` | Update description; one-line pointer at `/orchestrate-ralph-parallel` |
+| `orchestrate-ralph/PROMPT.md` | No change (canonical worker body) |
+| `orchestrate-ralph-parallel/ORCHESTRATOR.md` | New: verbatim copy of *current* `orchestrate-ralph/ORCHESTRATOR.md`, plus end-of-round `git branch -D` edit |
+| `orchestrate-ralph-parallel/SKILL.md` | New: neutral description (above), `parallel-safe` prerequisite, optional `N` argument |
 | `orchestrate-ralph-parallel/PROMPT.md` | Relative symlink → `../orchestrate-ralph/PROMPT.md` |
-| `setup-ralph/templates/ralph.md` | Reframe `## Parallelism` as a capability declaration; pointer to parallel skill |
+| `setup-ralph/templates/ralph.md` | `## Parallelism` reframed as capability declaration; default `false`; pointer to parallel skill |
 | `setup-ralph/SKILL.md` | Light edit where `orchestrate-ralph` is referenced |
-| `CONTEXT.md` | Replace "Wave vs. round" with "Wave (parallel skill only) vs. round"; add a "Single mode vs. parallel mode" section naming both skills and pointing at ADR 0007 |
-| `README.md` | Update "Two skills" → "Three skills" (with cleanup-ralph from the separate plan); reframe parallel as opt-in |
-| `docs/adr/0007-...md` | The ADR itself (already written) |
+| `CONTEXT.md` | "Wave vs. round" → "Wave (parallel skill only) vs. round"; add "Single mode vs. parallel mode" section |
+| `README.md` | "Two skills" → "Three skills" (with `cleanup-ralph`); reframe parallel as opt-in |
+| `docs/adr/0007-...md` | Amend with re-gate rationale (above) and the "install-time copy is fine" clarification |
 
 ## Order
 
-1. **ADR 0007** — already written; lands as its own commit.
-2. **Create `orchestrate-ralph-parallel/`** as a verbatim copy of current `orchestrate-ralph/` (ORCHESTRATOR.md + SKILL.md). `PROMPT.md` becomes a relative symlink. Verify the parallel skill works as-is — at this point nothing else has changed and the existing `parallel-safe: true` flow goes through it.
-   - Then apply **one surgical edit** to `orchestrate-ralph-parallel/ORCHESTRATOR.md` for ADR 0007 Decision #6: at end of step 10 (after the wave summary), add a paragraph that iterates the wave's workers and runs `git branch -D <branch>` per dispatched worker. One bare `Bash` call per branch (no `&&` chain — preserves per-step output). Place this *after* step 9's recovery has fully resolved, so survivor and boot branch refs were available throughout recovery.
-3. **Rewrite `orchestrate-ralph/ORCHESTRATOR.md`** for single-worker. See "Pruning detail" below.
-4. **Update `orchestrate-ralph/SKILL.md`:**
-   - Description: "Run a Ralph loop as an interactive orchestrator that dispatches **one** worker sub-agent per round to grind a project's issue tracker to done. Use when asked to 'orchestrate ralph,' run the Ralph loop, or drive the issue tracker with sub-agents."
-   - Add a one-line "For parallel mode (multi-worker waves), see `/orchestrate-ralph-parallel`."
-   - Prerequisite checks and session-setup section are unchanged (those are shared mechanics).
-5. **Tune `orchestrate-ralph-parallel/SKILL.md`:**
-   - Description: "Run a Ralph loop in parallel-wave mode (multiple worker sub-agents per round). Use when the project has `parallel-safe: true` in `docs/agents/ralph.md` and you have judged this issue set to be parallel-safe. For the canonical (one worker per round) loop, see `/orchestrate-ralph`."
-   - Add prerequisite #3: "**The repo declares itself parallel-safe.** `docs/agents/ralph.md` must contain `parallel-safe: true`. If absent or false, stop and tell the user that this repo's tracker doesn't expose a dependency relation suitable for parallel waves; run `/orchestrate-ralph` instead."
-   - Accept optional `N` argument (default `5`). Pass it to the orchestrator doctrine as `MAX_PARALLEL`.
-6. **Update `setup-ralph/templates/ralph.md` `## Parallelism` section:**
-   - Keep `parallel-safe: false` as the template default.
-   - Reframe the comment: "Set `true` only if the issue tracker exposes a dependency relation the orchestrator can read — see the 'Ralph loop' section of `docs/agents/issue-tracker.md`. This is a **capability declaration** required by `/orchestrate-ralph-parallel`; `/orchestrate-ralph` (single-worker, the canonical loop) ignores this flag."
-7. **Light edit `setup-ralph/SKILL.md`:** references to `orchestrate-ralph` that talk about parallel waves should clarify the split. The repair-symptom catalog probably doesn't need changes.
-8. **Update `CONTEXT.md`:**
-   - "Wave vs. round" → "Wave (parallel skill only) vs. round." Wave vocabulary survives only in the parallel skill.
-   - Add a one-paragraph "Single mode vs. parallel mode" section naming the two skills and pointing at ADR 0007.
-9. **Update `README.md`:** "Two skills" → "Three skills" (including cleanup-ralph if its plan has shipped), reframe parallel as opt-in, point at ADR 0007.
+1. **Amend ADR 0007** with the re-gate rationale and PROMPT.md
+   install-time clarification. Lands as its own commit.
+2. **Create `orchestrate-ralph-parallel/`** as a verbatim copy of
+   current `orchestrate-ralph/` (ORCHESTRATOR.md + SKILL.md). Source
+   `PROMPT.md` becomes a relative symlink. Verify the parallel skill
+   still works as-is via the existing `parallel-safe: true` flow.
+   - Then apply **one surgical edit** to
+     `orchestrate-ralph-parallel/ORCHESTRATOR.md` for Decision #6:
+     at end of step 10 (after the wave summary), add a paragraph
+     that iterates the wave's workers and runs `git branch -D <branch>`
+     per dispatched worker. One bare `Bash` per branch (no `&&`
+     chain — preserves per-step output). Place this *after* step 9's
+     recovery so survivor/boot branch refs were available throughout
+     recovery.
+3. **Rewrite `orchestrate-ralph/ORCHESTRATOR.md`** for single-worker.
+   See "Pruning detail" below — single-skill is authoritative for
+   shared mechanics, so the rewrite is also the source of truth for
+   the parallel skill's subsequent drift reconciliation.
+4. **Update `orchestrate-ralph/SKILL.md`** — description per ADR 0007
+   plus one-line pointer at the parallel sibling.
+5. **Tune `orchestrate-ralph-parallel/SKILL.md`** — neutral description
+   (above), `parallel-safe: true` prerequisite check, optional `N`
+   argument (default 5).
+6. **Update `setup-ralph/templates/ralph.md` `## Parallelism`** — keep
+   `parallel-safe: false` as default; reframe comment as capability
+   declaration; point at parallel skill.
+7. **Light edit `setup-ralph/SKILL.md`** where parallel waves are
+   referenced.
+8. **Update `CONTEXT.md`** per touch list.
+9. **Update `README.md`** per touch list.
+10. **Run drift-detection diff smoke tests** end-to-end; reconcile
+    anything that isn't a knowing N-shape difference.
 
-## Pruning detail — `orchestrate-ralph/ORCHESTRATOR.md`
+## Pruning detail
 
-What to remove or collapse:
+`orchestrate-ralph/ORCHESTRATOR.md`, edit by edit:
 
-- **Configuration §:** Drop the `MAX_PARALLEL` entry and the `parallel-safe` reference inside it. Keep `WORKER_TIMEOUT`, `RETRY_BUDGET`, `MAX_CONSECUTIVE_FAILS`.
-- **Step 1 (Recover an interrupted wave first):** Reword as "Recover an interrupted round first." The mechanics (look for an unfinished dispatch, reset to pre-round tip, etc.) are unchanged, just singular.
-- **Step 2 (Pick the wave):** Rename to "Pick the next issue." Drop the wave-fill loop and the "spread across distinct features" rule. Keep eligibility (every dependency `done`). Record the integration tip as **pre-round tip**, plus the round start time and the pre-round untracked-files baseline. If no issue is eligible but `ready-for-agent` remain, halt as today.
-- **Step 3 (Dispatch the wave):** Rename to "Dispatch the worker (foreground, one call)." Drop "all of them in a single message." The background-dispatch warning stays (the harness still drops isolation on background, and the worker would then run on integration — still broken at N=1). The foreground-suspension paragraph simplifies to "the call suspends you until the worker returns."
-- **Step 4 (While the wave runs):** Rename to "While the worker runs." Plurals → singular. `WORKER_TIMEOUT` advisory note stays as-is.
-- **Step 5 (Escape checks, then collect outcomes):** Plurals → singular. Both escape checks (committed + untracked) stay. Outcome reading collapses to one outcome, not a list. Reclassification rules unchanged.
-- **Step 6 (Merge `done`-reporting workers' branches):** Rename to "Merge the worker's branch if it reported done." **Delete** the merge-ordering paragraph (no siblings to order). **Delete** the sibling-conflict paragraph (the worker reset to the integration tip → merge is fast-forward by construction). The untracked-escape collision case stays (escape vector exists at N=1). Worktree reaping stays — `git worktree unlock` then `git worktree remove --force`.
-- **Step 7 (Gate the merged tip):** "Merged tip" → "post-merge integration tip" (one branch on it). Gate runs **once**. Green → step 8. Red → step 8's recovery branch (folded in below).
-- **Step 8 (Transition):** Per-outcome table simplifies: drop the `merge-conflict` row (impossible at N=1). Add a new row for the red-gate case (formerly handled in step 9): "`done`, in the merged set, step-7 gate **red** → `git reset --hard <pre-round-tip>`; comment 'post-hoc gate fail on integration re-run'; leave at `ready-for-agent`; counts toward retry budget."
-- **Step 9 (Recover):** **Delete entirely.** Its content is one outcome-class row in step 8.
-- **Step 10 (Wave summary):** Rename to "Round summary." "Per worker" → "the worker" (singular). Wall time, worker outcome, `<usage>` block. Escalation handling unchanged. **Add end-of-round branch cleanup:** after the summary is printed, run `git branch -D <branch>` for the worker dispatched this round. Single bare `Bash` call. The branch's commit (if any) is reachable via the integration merge commit on the green path; on the red path the commit is unreachable but lives in the reflog for 90 days. Per ADR 0007 Decision #6.
-- **Stop conditions:** **Delete "Systemic wave failure"** (no wave to fail systemically; `MAX_CONSECUTIVE_FAILS` absorbs the signal). Keep the rest.
-- **Harness assumptions §:** Trim the background-dispatch bullet's "parallel workers would collide on one branch" tail — leave only the matter-of-fact "background dispatch silently drops isolation; the worker would then run on the integration branch." Keep the foreground-suspension bullet but simplify "every worker in the dispatching message" → "the worker."
-- **Dispatch template:** Plurals → singular wherever they appear ("each worker" → "the worker"). The template body otherwise unchanged.
-- **Merge and gate procedures:** Unchanged.
+- **Configuration §:** Drop `MAX_PARALLEL` and `parallel-safe` references; keep `WORKER_TIMEOUT`, `RETRY_BUDGET`, `MAX_CONSECUTIVE_FAILS`.
+- **Step 1:** "wave" → "round."
+- **Step 2 (Pick the next issue):** drop wave-fill loop and "spread across distinct features"; keep eligibility; record pre-round tip, start time, untracked baseline.
+- **Step 3 (Dispatch the worker, foreground, one call):** drop "all in a single message"; background-dispatch warning stays; foreground-suspension simplifies.
+- **Step 4 (While the worker runs):** plurals → singular.
+- **Step 5 (Escape checks, then collect outcome):** plurals → singular; both escape checks stay; reclassification rules unchanged.
+- **Step 6 (Merge the worker's branch if it reported done):** delete merge-ordering paragraph; delete sibling-conflict paragraph (worker reset to integration tip → FF by construction); untracked-escape collision case stays; worktree reaping stays.
+- **Step 7 (Gate the post-merge tip):** gate runs once; green → step 8; red → step 8's recovery row.
+- **Step 8 (Transition):** drop `merge-conflict` outcome row; add red-gate row (`git reset --hard <pre-round-tip>`; comment 'post-hoc gate fail on integration re-run'; leave at `ready-for-agent`; counts toward retry budget).
+- **Step 9:** delete entirely (folded into step 8).
+- **Step 10 (Round summary):** singular throughout; **add end-of-round `git branch -D <branch>`** for the dispatched worker, one bare `Bash` call.
+- **Stop conditions:** delete "Systemic wave failure"; keep the rest.
+- **Harness assumptions §:** trim background-dispatch bullet's parallel tail; simplify foreground-suspension bullet.
+- **Dispatch template:** plurals → singular.
+- **Merge and gate procedures:** unchanged.
 
 ## Validation
 
-- **Diff** `orchestrate-ralph/ORCHESTRATOR.md` against `orchestrate-ralph-parallel/ORCHESTRATOR.md`. Every difference should be either an N=1 collapse or a removal of parallel-only content. No accidental drift in shared sections (harness assumptions, prerequisites, session setup, permission matcher, gate / merge procedures, stop conditions).
-- **Grep** the single-skill ORCHESTRATOR.md cold and confirm none of these strings appear: `wave`, `parallel`, `MAX_PARALLEL`, `merged set`, `survivor`, `leave-one-out`, `singleton`.
-- After a smoke run of `/orchestrate-ralph`, confirm `git branch | grep worktree-` is **empty** at end-of-round on the success path, and also empty on a deliberately-broken (red-gate) round. Confirm the failing round's worker commit is still recoverable via `git reflog`.
-- After a smoke run of `/orchestrate-ralph-parallel 2`, confirm the same — both worker branches gone at end-of-round regardless of outcome (merged, conflict, failed, booted).
-- Confirm `orchestrate-ralph-parallel/PROMPT.md` resolves to `orchestrate-ralph/PROMPT.md` from the install location (`~/.claude/skills/`) and from this worktree (where the install symlink points to the worktree copies).
-- Smoke-run `/orchestrate-ralph` on a small issue set; confirm a successful round end-to-end with no wave vocabulary surfacing.
-- Smoke-run `/orchestrate-ralph-parallel 2` on the same set with `parallel-safe: true` (set it temporarily). Confirm the prerequisite check passes and the existing wave loop runs.
-- Smoke-run `/orchestrate-ralph-parallel` against a repo with `parallel-safe: false`. Confirm the prerequisite halt fires cleanly with the right pointer to `/orchestrate-ralph`.
+- **Drift-detection diffs** per the procedure above. No accidental drift in shared sections.
+- **Grep cold** single-skill ORCHESTRATOR.md for `wave`, `parallel`, `MAX_PARALLEL`, `merged set`, `survivor`, `leave-one-out`, `singleton` — all must be absent.
+- **Smoke-run `/orchestrate-ralph`** on a small fresh-from-zero app's backlog (same conditions that motivated the redesign — conflict-heavy issue set). Confirm: worker dispatch, re-gate (red and green paths), transition, retry, `needs-info` escalation, stop conditions all behave; `git branch | grep worktree-` is **empty** at end-of-round on success **and** on a deliberately-broken red-gate round; the failing round's worker commit is still recoverable via `git reflog`.
+- **Smoke-run `/orchestrate-ralph-parallel 2`** on the same set with `parallel-safe: true` temporarily set. Confirm the existing wave loop runs and both worker branches are gone at end-of-round regardless of outcome.
+- **Smoke-run `/orchestrate-ralph-parallel`** against a repo with `parallel-safe: false`. Confirm the prerequisite halt fires cleanly with the right pointer to `/orchestrate-ralph`.
+- **Install-shape check:** verify the parallel skill works both (a) when installed via the dev symlink workflow (symlink preserved) and (b) when installed as two physical copies (e.g., `cp -L` or fresh `cp` of both directories). Both should resolve PROMPT.md and run.
 
 ## Open follow-ups not in this plan
 
-- The handoff's pending live-verification items (step-6 merge ordering, step-9 recovery branches) continue to apply to the **parallel** skill specifically. They are not affected by this split; the parallel skill's `ORCHESTRATOR.md` is a verbatim copy.
-- A `setup-ralph` round that prompts the user "this repo has `parallel-safe: false` — is that still right, or would you like to declare it parallel-safe?" could land later but is not blocked by this plan.
+- The handoff's pending live-verification items (step-6 merge ordering, step-9 recovery branches) continue to apply to the **parallel** skill specifically. They are not affected by this split.
+- A `setup-ralph` round that prompts the user "this repo has `parallel-safe: false` — is that still right?" could land later.
+- `plans/cleanup-ralph-skill.md` ships on its own timeline; this plan does not block it and is not blocked by it.
