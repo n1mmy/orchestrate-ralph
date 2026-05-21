@@ -1,27 +1,10 @@
 {
+  "_comment": "Group M, M5: probes whether Bash(git status:*) accepts suffix args. Allowlist contains ONLY Bash(git status:*) — NOT Bash(git:*) — so a successful git status --short run can be attributed unambiguously to the multi-word rule.",
   "permissions": {
     "defaultMode": "dontAsk",
     "allow": [
-      "Write",
       "Read",
-      "Edit",
-      "Glob",
-      "Grep",
-      "Agent",
-      "Bash(git:*)",
-      "Bash(rg:*)",
-      "Bash(ugrep:*)",
-      "Bash(grep:*)",
-      "Bash(find:*)",
-      "Bash(bfs:*)",
-      "Bash(cat:*)",
-      "Bash(head:*)",
-      "Bash(tail:*)",
-      "Bash(ls:*)",
-      "Bash(command -v:*)",
-      "Bash(which:*)",
-      "Bash(test:*)",
-      "Bash(echo:*)"
+      "Bash(git status:*)"
     ],
     "deny": [
       "Bash(git push:*)",

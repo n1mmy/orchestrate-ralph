@@ -9,11 +9,10 @@ Run the interactive Ralph orchestrator over this repo's issue tracker.
 
 ## Prerequisites — check first, stop if any is missing
 
-Run each check as its own **single bare `Bash` call** — no `&&` / `;` / `|`
-chains, no redirects, no `echo`-labelled bundles. A compound command is a
-distinct pattern the permission matcher does not recognise; it prompts (or,
-unattended, fails) right at the start of the run. For the file-existence
-checks in item 1, prefer `Read` or `Glob` — no `Bash` is needed at all.
+Run each check as its own bare `Bash` call — `echo`-labelled bundles and
+`&&` chains lose the clean per-check signal you'd otherwise get on the first
+failure. For the file-existence checks in item 1, prefer `Read` or `Glob` —
+no `Bash` is needed at all.
 
 1. **`setup-ralph` has been run.** `docs/agents/ralph.md` and
    `.ralph/settings.json` must both exist. If not, tell the user to run
@@ -21,12 +20,12 @@ checks in item 1, prefer `Read` or `Glob` — no `Bash` is needed at all.
 2. **You are on a clean, dedicated integration branch — ideally in a separate
    worktree.** The branch you are on becomes the integration branch: workers
    branch off it, merges land on it, and `git reset --hard` may run on it
-   (revert-and-serialize). So it must not be the repo's default branch
-   (`main` / `master`), the working tree must be clean, and it should be a
-   branch the user is happy to hand back. A fresh `git worktree` satisfies all
-   of this and keeps the run off the user's primary checkout — strongly
-   preferred. If you are in the primary checkout, stop and ask before
-   proceeding.
+   (the recovery flow rolls back failing merges). So it must not be the
+   repo's default branch (`main` / `master`), the working tree must be
+   clean, and it should be a branch the user is happy to hand back. A fresh
+   `git worktree` satisfies all of this and keeps the run off the user's
+   primary checkout — strongly preferred. If you are in the primary
+   checkout, stop and ask before proceeding.
 
 ## Session setup — placement and restart
 
@@ -47,11 +46,23 @@ Three states:
    worktree, then run `/orchestrate-ralph` again. Claude Code loads settings
    at session startup; this session predates the placement."*
 
-2. **It exists and differs from `.ralph/settings.json`.** Fatal. A
-   pre-existing `.claude/settings.local.json` is the user's own interactive
-   allow/deny list — valuable, not stale; never overwrite, swap, or back it
-   up. Tell the user to run in a fresh worktree (the recommended location
-   anyway). **Do not suggest they delete the file.**
+2. **It exists and differs from `.ralph/settings.json`.** Never touch it
+   yourself — `.claude/settings.local.json` is normally the user's own
+   interactive allow/deny list, valuable rather than stale. `Read` it
+   first and inspect: if it is **small** (a handful of entries, no
+   orchestrate-ralph signature like `defaultMode: dontAsk`, the
+   path-guard hook, or the remote-git deny block), and the worktree is
+   otherwise fresh (clean tree on a disposable branch), it is likely
+   starter scaffolding claude auto-created in this worktree — not
+   accumulated history. In that case, halt with a *suggestion* the user
+   can take or leave: they may remove the file (`rm
+   .claude/settings.local.json`) and re-run `/orchestrate-ralph`, which
+   will place `.ralph/settings.json` and prompt for the claude restart;
+   make explicit that you are not doing this yourself because the file
+   *might* still be valuable to them. If the file is substantial — many
+   entries, or a diverged orchestrate-ralph signature — halt and tell
+   the user to run in a fresh worktree instead. Never call the file
+   stale; never offer to remove it for the user.
 
 3. **It exists and is byte-identical to `.ralph/settings.json`.** It was
    placed by an earlier run — but whether *this* claude session actually
@@ -87,10 +98,3 @@ orchestrator it describes. Run that loop until a stop condition fires.
 wave selection, dispatch, retries, merge and gate-verify, escalation, stop
 conditions. This skill only points at it; do not paraphrase or second-guess it
 here.
-
-## Watching a run
-
-`watch-steps.py` (in this skill folder) turns the workers' transcripts into a
-compact one-line-per-tool-call log. Run it in a separate terminal:
-`python3 <skill-folder>/watch-steps.py <repo-worktree-path>`. It is a plain
-process, not an agent — nothing it reads enters any agent's context.

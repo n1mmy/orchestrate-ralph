@@ -49,14 +49,32 @@ revisit.
 - That isolation covers the worker's **git branch and index only — not the
   filesystem**. A worktree is a second checkout, not a sandbox: the worker
   process shares one filesystem with the orchestrator and every other checkout,
-  and `Write` / `Bash` can write to any absolute path the OS permits. A
-  worker's *file writes* stay inside its worktree only by its own path
-  discipline — see the escape checks in step 5. Running the orchestrator in a
-  separate worktree changes only the *blast radius* of an escape, not whether
-  one can happen. The path-guard hook shipped in `.ralph/settings.json` (a
-  `PreToolUse` hook) now hard-denies `Write` / `Edit` / `NotebookEdit` outside
-  the worktree; `Bash`-mediated writes cannot be statically guarded and remain
-  covered by the command-shape doctrine and step-5 detection.
+  and `Write` / `Bash` can write to any absolute path the OS permits. Running
+  the orchestrator in a separate worktree changes only the *blast radius* of
+  an escape, not whether one can happen. Two layers of static defence catch
+  most escape shapes — the path-guard hook in `.ralph/settings.json` (a
+  `PreToolUse` hook on `Write` / `Edit` / `NotebookEdit`) hard-denies edits
+  to a path outside `realpath(<worktree>)`, and the matcher's arg-locality
+  gate denies any absolute path outside the worktree appearing in a `Bash`
+  argument. Two residual vectors are *not* statically covered, and that is
+  why step-5 detection still exists:
+  - **Bash subprocesses with constructed paths.** A build tool, codegen, or
+    test runner the worker invokes can write wherever the worker tells it
+    to — the matcher checks the `Bash` arguments, not the subprocess's own
+    file writes. A worker that hands `cargo build --target-dir
+    ../other-worktree/x` to an allowlisted `cargo` only fails the
+    arg-locality gate on the `../other-worktree/x` token *if* the literal
+    string is an absolute path; a relative climb passes the gate, and once
+    `cargo` resolves it, the subprocess writes outside. **Untracked-escape**
+    catches the post-hoc litter.
+  - **Git plumbing on shared refs.** `git update-ref refs/heads/<branch>
+    <sha>` takes a *ref name*, not a path, so arg-locality has nothing to
+    flag; the actual filesystem write happens against the main `.git/refs/`
+    that worktrees share. A worker that smuggled a commit's tip onto the
+    integration branch this way leaves nothing in its own working tree to
+    detect. **Committed-escape** is the only thing that sees it: the
+    integration tip must not have moved before the orchestrator's first
+    merge of the wave.
 - `run_in_background: true` **silently drops** that isolation — the sub-agent
   then runs in the orchestrator's own worktree on the integration branch.
   Background dispatch is therefore unusable here: parallel workers would
@@ -69,9 +87,11 @@ revisit.
 
 Because every sub-agent is isolated, a merge or gate-verify sub-agent could not
 operate on the integration branch — its commit would land on a throwaway
-branch and its gate would test the wrong tree. So **merging and gate-verify are
+branch and its gate would test the wrong tree. So **merging and gating are
 not delegated**: the orchestrator runs them itself, directly in the
-integration worktree (steps 5 and 7).
+integration worktree. The same reasoning extends to the **transition phase**
+(step 8) and to the **per-branch verify gates** of recovery (step 9). The
+full direct surface is enumerated below.
 
 ## The hard rule: you never touch code
 
@@ -85,32 +105,52 @@ failure, or write project code. Every one of those is delegated to a fresh
 worker sub-agent. If you are tempted to "just quickly check" something in the
 codebase — don't. Dispatch a sub-agent.
 
-You *do*, directly, two things that integrate the run — because the harness
-isolates every sub-agent and so neither can be delegated:
+You *do*, directly, the integration-side actions of each round — because the
+harness isolates every sub-agent and so none of these can be delegated:
 
-- **Merge** a verified worker branch into the integration branch with `git
-  merge --no-ff` (step 5). A clean merge is tiny output. A merge that conflicts
-  is aborted immediately — you never resolve the conflict, you boot the issue
-  back to a worker.
-- **Run the gate** on the integration branch (step 7). You read only
-  pass/fail; you never fix a red gate yourself, you revert-and-serialize.
+- **Merge** verified worker branches into the integration branch with `git
+  merge --no-ff` (step 6). A clean merge is tiny output. A merge that
+  conflicts is aborted immediately — you never resolve the conflict, you
+  comment on the issue in step 8 and leave it for a fresh worker to redo on
+  top of the merge winner.
+- **Gate the merged tip** once per round (step 7). You read only pass/fail;
+  on red you enter recovery (step 9) rather than fixing it yourself.
+- **Per-branch verify gates in recovery** (step 9). When the merged-tip gate
+  is red, you reset the integration worktree to each merged branch in turn
+  and re-run the gate to isolate which branch(es) cause the failure. Pass/fail
+  only; on a per-branch red you boot the issue.
+- **Tracker writes in the transition phase** (step 8). Workers never write to
+  the tracker (ADR 0006); every label flip, status edit, and comment happens
+  here, by your direct hand. The verbs differ per tracker (`gh issue edit` /
+  `glab issue update` / `Edit` + `git commit` on the issue file); the
+  authority is uniform. `docs/agents/issue-tracker.md`'s "Ralph loop" lists
+  this repo's commands — its **Transition** and **Comment** rows are the
+  ones you use here.
 
 Beyond those, you *may* run git plumbing that produces little output (`git log
 --oneline`, `git status --short`, `git rev-parse`, `git worktree`, branch
-inspection), `date +%s` for wave timing, and read the config files named above
-and the issue tracker — always from your own integration worktree, or from a
-branch via `git show <ref>:<path>`, **never from inside a worker's worktree
-directory** (`.../agent-*/`). That is the whole of your direct surface. Prefer `Read`
-for file contents and the `Glob` / `Grep` tools for search — but native
-macOS/Linux Claude Code builds drop `Glob` / `Grep`, so if they are absent
-fall back to the allowlisted `rg` / `grep` / `find` (or `bfs` / `ugrep`) in
-`Bash`. Run each
-`Bash` command as its own bare call: never prefix one with `cd` (you are
-already in the integration worktree, and `cd`-before-`git` trips a safety
-prompt), never run a command by full path, and never use a compound shape —
-`&&` / `||` / `;` chains, pipes, redirects, subshells, or `for` loops. The
-permission matcher treats a compound as a distinct, unallowlisted pattern, so
-it prompts even when every constituent command is allowed.
+inspection, `git reset --hard <recorded-ref>`), `date +%s` for wave timing,
+and read the config files named above and the issue tracker — always from
+your own integration worktree, or from a branch via `git show <ref>:<path>`,
+**never from inside a worker's worktree directory** (`.../agent-*/`). That,
+plus the direct actions enumerated above, is the whole of your surface.
+Prefer `Read` for file contents and the `Glob` / `Grep` tools for search —
+but native macOS/Linux Claude Code builds drop `Glob` / `Grep`, so if they
+are absent fall back to the allowlisted `rg` / `grep` / `find` (or `bfs` /
+`ugrep`) in `Bash`.
+
+The permission matcher checks each segment of a separator-joined command
+(`&&`, `||`, `;`, `|`, `&`) against allow + deny independently — so a pipe
+between two allowlisted commands runs, and you can use one when bounded
+output matters. What denies regardless: subshells (`$(...)`, backticks);
+absolute paths outside the integration worktree in args, or any unexpanded
+`$VAR`; any first token containing `/` (`/usr/bin/git` denied even with
+`Bash(git:*)`); and the explicit denies on `cd`, `git -C`, and remote-git.
+Denials surface as clean "Denied by permissions" tool errors under
+`dontAsk`. The full empirical model is in
+[`docs/permission-matcher-tests.md`](../docs/permission-matcher-tests.md);
+the project's allow list lives in `.ralph/settings.json` (= the placed
+`.claude/settings.local.json`).
 
 ## Local git only — never contact a remote
 
@@ -126,11 +166,11 @@ clean tool error, not a prompt.
 
 ## Setup prerequisites — check before starting
 
-**Run every check below as its own bare `Bash` call.** The command-shape
-discipline above applies here especially — prerequisite checks are the most
-tempting place to break it. Never bundle them into one `echo`-labelled,
-`&&`-chained, `2>&1`-redirected command: the matcher treats that compound as a
-single unallowlisted pattern, and it prompts at the very start of the run.
+**Run every check below as its own bare `Bash` call.** Prerequisite checks
+are the most tempting place to bundle into one `echo`-labelled, `&&`-chained,
+`2>&1`-redirected command. Don't: the gain in compactness is small, and
+filtering or labelling the output here costs you the clean per-check
+signal you'd otherwise get on the first failure.
 
 1. **You are on a clean, dedicated integration branch.** The branch you are on
    becomes the **integration branch**: workers branch off it, their work merges
@@ -140,8 +180,8 @@ single unallowlisted pattern, and it prompts at the very start of the run.
      straight on the trunk. Check against `git symbolic-ref
      refs/remotes/origin/HEAD` (or the known default).
    - The working tree must be **clean** (`git status --porcelain` empty) — the
-     revert-and-serialize step (step 7) runs `git reset --hard`, which would
-     destroy any uncommitted work.
+     recovery flow (step 9) runs `git reset --hard` to roll back failing
+     merges, which would destroy any uncommitted work.
    - Running in a **separate git worktree**, not the repo's primary checkout,
      is strongly preferred: the loop is long-lived and ties up wherever it
      runs, and a fresh worktree gives a clean tree and a disposable branch for
@@ -198,15 +238,22 @@ Before anything else, every round — and on every re-entry, whether from a user
 message or a fresh `orchestrate-ralph` invocation:
 
 - **Recover an interrupted wave first.** A worker's permission denial should
-  not halt you (step 6), but if it does, you re-enter here. Look back at your
-  recent context: if your last action was a wave dispatch whose result block
-  you never processed, recover it now. For each worker in that block that
-  completed, run the step-5 verify-and-merge — **idempotent**: skip any whose
-  issue is already `done`/merged. For any worker that returned a
-  permission-rejection error, treat it as a step-6 failure and retry its issue.
-  Then gate (step 7) and continue. This is keyed on *your own state*, not a
-  keyword — "resume", "retry", "continue", a bare re-invocation all re-enter
-  here. On a cold start there is nothing to recover.
+  not halt you (step 5), but if it does, you re-enter here. Look back at your
+  recent context for an unfinished wave: a dispatch message whose result
+  block you never processed, or a step-7 gate / step-8 transition / step-9
+  recovery you stopped mid-way. If the integration tip is ahead of any
+  pre-wave tip you can still find in context, **reset to that tip** with
+  `git reset --hard <pre-wave-tip>` and treat the wave as never having
+  merged: its workers' branches still exist, but next round will re-dispatch
+  fresh workers on those issues (cheaper than reconstructing lost
+  `reasonText` from agent transcripts). Worker outcomes are not durable —
+  they live only in *your* context — so a re-entry that lost them must
+  re-derive them by re-dispatching, not by guessing. If you cannot find the
+  pre-wave tip either (a very stale re-entry), trust the tracker: re-read it
+  in the next bullet, and any issue still at `ready-for-agent` is fair game
+  again. This is keyed on *your own state*, not a keyword — "resume",
+  "retry", "continue", a bare re-invocation all re-enter here. On a cold
+  start there is nothing to recover.
 - **Check for any queued user message.** The user may have unblocked an issue,
   redirected, or answered an escalation. Incorporate it.
 - **Reload issue state.** Re-discover issues per the tracker's "Ralph loop"
@@ -223,14 +270,14 @@ message or a fresh `orchestrate-ralph` invocation:
   When more than `MAX_PARALLEL` are eligible, **prefer a spread across distinct
   features** (per the tracker's feature grouping): different features draw from
   independent dependency chains, so they rarely touch the same files. Do not
-  estimate file sets — a wrong pick is caught reactively by the merge (step 5)
+  estimate file sets — a wrong pick is caught reactively by the merge (step 6)
   and gate (step 7) at the cost of one re-run.
 - If no issue is eligible but `ready-for-agent` issues remain (all blocked),
   halt and surface it.
-- Record the integration tip (`git rev-parse HEAD`) — the pre-wave tip, needed
-  for revert in step 7 — the wave start time (`date +%s`), and a pre-wave
-  untracked-files baseline (`git status --porcelain`), needed for the
-  untracked-escape check in step 5.
+- Record the integration tip (`git rev-parse HEAD`) — the **pre-wave tip**,
+  needed by step 9's recovery flow — plus the wave start time (`date +%s`)
+  for step 10's summary, and a pre-wave untracked-files baseline (`git status
+  --porcelain`) needed for the untracked-escape check in step 5.
 
 ### 3 — Dispatch the wave (foreground, one message)
 
@@ -257,144 +304,252 @@ isolation; see step 4.
 
 A foreground wave suspends you until the whole dispatch message returns. You
 cannot wake, monitor, or kill a worker mid-wave. (The human can still watch
-progress — workers render their steps in the GUI, and `watch-steps.py` gives
-the same view in a terminal.)
+progress — workers render their steps in the Claude Code GUI.)
 
 One consequence: **`WORKER_TIMEOUT` is advisory — you do not enforce it.** You
 have no kill hook. Enforcement is worker-side: the dispatch template tells each
-worker its budget and to write a failure note and stop rather than run
+worker its budget and to report `failed` with a `reasonText` rather than run
 indefinitely. A genuinely hung worker stalls only its own wave, until the
-agent runtime ends it; on return, treat it as a failure (step 6). Its *git*
-work is isolated to its own branch — but its *file writes* are not sandboxed
+agent runtime ends it; on return, step 5 reclassifies it as a `failed`
+outcome with a `reasonText` taken from the framework error. Its *git* work
+is isolated to its own branch — but its *file writes* are not sandboxed
 (see "Harness assumptions"), so a worker can still litter another checkout's
 working tree; step 5 checks for that.
 
-### 5 — Collect and merge
+### 5 — Escape checks, then collect outcomes
 
 When the wave's dispatch message returns, all workers have resolved together.
-Before merging anything, run two **escape checks** — `isolation: "worktree"`
-does not sandbox a worker's file writes, so a worker can escape its worktree
-two ways:
+Before reading any worker's report, run two **escape checks** — these are
+detection for the two residual escape vectors the path-guard hook and the
+matcher's arg-locality gate cannot statically see (see "Harness
+assumptions"):
 
-- **Committed escape.** The integration branch's current tip must equal the
-  pre-wave tip recorded in step 2 — you have run no merge yet, and an isolated
-  worker only ever commits to its *own* branch, so the tip *cannot* have
-  advanced on its own. If it has, a worker committed onto the integration
-  branch directly: **halt** on a worktree-isolation breach (see stop
+- **Committed escape** *(detects git-plumbing on shared refs)*. The
+  integration branch's current tip must equal the pre-wave tip recorded in
+  step 2 — you have run no merge yet, and an isolated worker only ever
+  commits to its *own* branch, so the tip *cannot* have advanced on its
+  own. If it has, a worker used `git update-ref` or similar to smuggle a
+  commit onto the integration branch (a ref-name argument that arg-locality
+  could not gate): **halt** on a worktree-isolation breach (see stop
   conditions). The branch's trust is broken; do not merge on top of it.
-- **Untracked escape.** Run `git status --porcelain` and diff it against the
-  pre-wave baseline from step 2. Only *newly* appeared untracked files are the
-  signal — a worker wrote project files into this checkout via an absolute or
-  worktree-climbing path (untracked, so the tip never moved and the
-  committed-escape check passed clean); files already in the baseline are
-  pre-existing build artifacts, not an escape. This is **not** fatal: the
-  worker's own branch still carries the correct deliverable, and the escaped
-  files are duplicate litter. Note it against the issue and continue — but
-  expect the litter to collide with a merge below.
+- **Untracked escape** *(detects Bash-subprocess writes via constructed
+  paths)*. Run `git status --porcelain` and diff it against the pre-wave
+  baseline from step 2. Newly-appeared untracked files mean a worker
+  invoked a build tool / codegen / test runner that wrote into this
+  checkout — the matcher gated the worker's `Bash` argument, but a
+  relative-climbing or worker-constructed path resolved by the subprocess
+  itself slipped past. Files already in the baseline are pre-existing build
+  artifacts, not an escape. **Not fatal:** the worker's own branch still
+  carries the correct deliverable, and the escaped files are duplicate
+  litter. Record the escaping worker so step 8 can comment on its issue,
+  and continue — expect the litter to collide with that worker's merge in
+  step 6.
 
-Then, for each worker:
+Then, for each worker, read its **outcome** — the labelled lines the
+dispatch template told the worker to produce:
 
-- Read its result — but **do not trust the self-report**. Verify the durable
-  artifacts on **the worker's own branch**, with `git` run from your own
-  worktree — **never by reading files inside the worker's worktree directory**
-  (`.../agent-*/`). That directory is the worker's, and you reap it below; the
-  branch is the durable artifact, and `git` reads it from anywhere. Confirm a
-  commit landed (`git log <worker-branch>`), and read the issue's transitioned
-  `Status:` from that branch (`git show <worker-branch>:<issue-file>`). A
-  worker that reports success but left the issue at `ready-for-agent`, or whose
-  own branch carries no new commit, is a **failure** (step 6), not a success.
-- If verified, **merge it yourself**: `git merge --no-ff <worker-branch>` into
-  the integration branch (see the merge procedure below).
-  - Clean merge → the branch is integrated. **Reap the worker's worktree** so
-    it does not leak: `git worktree unlock <path>` then `git worktree remove
-    --force <path>`. Run the unlock and the remove as **separate bare `Bash`
-    calls**, one tool call each — never a `for` loop or an `&&`/`;` chain (a
-    compound shell is an unrecognised command shape and prompts). Unlock first;
-    a bare `remove` skips a locked worktree. Removal drops only the directory;
-    the worker's branch ref survives.
-  - Aborts citing *untracked working tree files would be overwritten* → an
-    untracked escape collided with this merge. Recover with `git clean -f --
-    <the paths git named>` and re-run the merge once (see the merge procedure
-    below). This is the **only** untracked-file removal you may do —
-    non-colliding litter you leave in place and report.
-  - Conflict → `git merge --abort` at once and boot the issue back to
-    `ready-for-agent`. Do not resolve the conflict. Its re-run next round
-    branches off the updated tip — which now includes the merge winner — so it
-    redoes its work *on top of* the winner: sequential, conflict-free by
-    construction.
+```
+outcome: done | failed | needs-info
+branch: <name>
+reasonText: <one line>      (present for failed / needs-info; absent for done)
+```
 
-### 6 — Smart retries
+Treat the report as structured input. Workers do not write to the tracker
+(ADR 0006); there is no `Status:` line to read on the worker's branch, and
+no `## Comments` note for you to compare against. The report is your only
+account of what happened *inside* the worker; the worker's branch is your
+only durable artifact for what it built. Both are read with `git` /
+`<gh|glab>` from your own integration worktree — **never by reading inside
+the worker's worktree directory** (`.../agent-*/`). That directory is the
+worker's, and step 6 reaps it.
 
-A worker outcome is one of:
+Reclassify two cases before moving on:
 
-- **Success** (verified in step 5) → done with this issue.
-- **Failure** (gate red, crash, out-of-time, permission-denied, worktree
-  escape, or unverified self-report) → a terse failure note belongs on the
-  issue (per the tracker's comment step), and the issue stays
-  `ready-for-agent`. A graceful worker writes that note itself; on a hard
-  crash, an out-of-time worker, or a permission-denied worker, *you* write a
-  one-line note ("attempt N: timed out"). If the worker returned but its own
-  branch carries no commit, note "attempt N: no commit on branch — possible
-  worktree escape, check other worktrees for stray commits" so the user can
-  investigate. Next round a **fresh** worker picks the issue up and reads it
-  *including* the prior notes — a clean-context retry that can still see what
-  the last attempt hit.
-- **`needs-info`** (the worker explicitly judged the issue wrong or blocked) →
-  **not retried**. That is the worker's considered judgment; re-running just
-  re-derives the same blocker. Escalate it (step 8).
+- A worker reporting `done` whose branch carries no new commit
+  (`git log <worker-branch>` shows nothing new) becomes `failed` with
+  `reasonText = "no commit on branch — possible worktree escape, check other
+  worktrees for stray commits"`. The original report is unreliable; the
+  classification change travels into steps 6 and 8.
+- A worker the `Agent` framework returned as denied / crashed / out-of-time —
+  no `outcome` field at all — becomes `failed` with `reasonText` taken from
+  the framework error (e.g. *"attempt N: timed out"*, or the exact blocked
+  command string from a permission rejection). A permission-denied worker is
+  an ordinary failure, **not** a halt; the "STOP what you are doing" text
+  some rejections carry is addressed to the **worker**, not to you. Quote
+  the blocked command verbatim in `reasonText` — a config-shaped halt
+  summary (see "Stop conditions") reads it back from these comments.
 
-**A permission-denied worker does not halt the loop.** A worker that fails on
-a blocked command — auto-denied under `dontAsk`, or a prompt-rejection
-carrying *"STOP what you are doing and wait for the user"* under `default`
-mode — is an ordinary **Failure**. The "STOP" text, when it appears, is
-addressed to the **worker**, not to you. Do **not** halt. Merge the workers
-that succeeded, write the failed worker's note yourself, retry its issue. If
-a denial *does* halt you anyway, step 1 recovers the wave on re-entry. Either
-way, **record the exact blocked command string** from the rejection — a
-config-shaped halt summary quotes it (see "Stop conditions").
+### 6 — Merge `done`-reporting workers' branches
 
-**Retry budget** — an issue carrying `RETRY_BUDGET + 1` failure notes is
-exhausted: transition it to `needs-info`, escalate it (step 8), and count it
-once toward `MAX_CONSECUTIVE_FAILS`.
+For each worker whose collected outcome is `done` (after step 5's
+reclassification), merge into the integration branch using the merge
+procedure below.
 
-### 7 — Wave barrier and gate verify
+- **Clean merge** → record the worker in the **merged set** for this wave.
+- **Aborts citing *untracked working tree files would be overwritten*** —
+  untracked-escape litter collided with this merge. `git clean -f --` the
+  paths git named, then re-run the merge once. Treat the post-clean outcome
+  the same as a fresh merge attempt.
+- **Conflict** — `git merge --abort` at once. Do **not** resolve it. Mark
+  this worker's outcome as `merge-conflict` for step 8 (the comment names
+  the sibling branches); leave the issue untouched here. Next round's worker
+  branches off the updated tip — which by then includes the merge winners —
+  and redoes its work on top of them: sequential, conflict-free by
+  construction.
 
-Once the wave's dispatch message has returned **and** all merges have run, run
-the project gate yourself on the integration branch (see the gate procedure
-below).
+After the merge attempt — clean, conflict, or skipped (for `failed` /
+`needs-info` outcomes that did not commit) — **reap the worker's worktree**
+so it does not leak: `git worktree unlock <path>` then `git worktree remove
+--force <path>` as two separate bare `Bash` calls. A `for` loop is a subshell
+shape the matcher denies; an `&&` chain would decompose and run but loses you
+per-step output to diagnose if either side fails. Unlock first; a bare
+`remove` skips a locked worktree. Removal drops only the directory; the
+worker's branch ref survives so step 8 (or step 9) can still merge or gate it.
 
-- **Green** → the wave is integrated. Go to the next round.
+The result of this step: a **merged set** ⊆ the `done`-reporting workers,
+plus a per-worker outcome class that step 8 will write against (`done` if in
+the merged set, `merge-conflict` if its merge aborted, `failed` or
+`needs-info` if reported as such, with the reclassifications from step 5
+folded in).
+
+### 7 — Gate the merged tip
+
+Once every step-6 merge has run, run the project gate **once** on the
+integration branch's merged tip (see the gate procedure below). This is the
+single authoritative gate of the round.
+
+- **Green** → the merged set is integrated *and verified*. Proceed to step 8;
+  every worker in the merged set will receive the `done` write.
 - **Red** → a cross-issue break slipped past the workers' own gates (e.g.
   issue A changed a signature, issue B in another file called it; git merged
-  clean, the build broke). Apply **revert-and-serialize**:
-  1. Reset the integration branch to the pre-wave tip recorded in step 2
-     (`git reset --hard <tip>` — deliberate, on your own worktree, your own
-     recorded ref).
-  2. Boot every issue in the wave back to `ready-for-agent`.
-  3. Run those issues **serially** next round (`MAX_PARALLEL = 1` for them).
-     Serial re-runs structurally eliminate cross-issue breaks — each issue then
-     builds against the previous one's merged change. If a serial re-run still
-     fails, ordinary smart-retry (step 6) catches it.
+  clean, the build broke). Go to **step 9 (recover)**. Do not write `done`
+  for anyone yet — per ADR 0006 the label is written only when the
+  integration tip containing the worker's branch gates green.
 
-Then, green or red, print the **wave summary**:
+If the merged set is empty (every worker reported `failed`, `needs-info`, or
+merge-conflicted), skip the gate — there is nothing new to verify. Go
+straight to step 8.
+
+### 8 — Transition: write to the issue tracker
+
+This is the only step in the round that writes to the tracker; workers
+never did. The per-tracker commands live in `docs/agents/issue-tracker.md`'s
+"Ralph loop" section — its **Transition** and **Comment** rows are the
+ones you call here.
+
+For local-markdown trackers each write is an `Edit` on the issue file plus
+`git add` + a single `git commit` on the integration branch — cluster this
+round's writes into **one commit per round** to keep history clean. For
+GitHub / GitLab each write is a `gh` / `glab` call.
+
+Per worker, by outcome class produced in steps 5–7:
+
+| Class | Tracker write |
+|---|---|
+| `done`, in the merged set, step-7 gate **green** | Transition the issue to `done`. |
+| `done`, in the merged set, step-7 gate **red** | (Handled in step 9; do not write here.) |
+| `merge-conflict` (step 6) | Comment naming the conflict (e.g. "merge conflict against `<sibling-branch>` — retry next round will branch off the merge winner"); leave at `ready-for-agent`. |
+| `failed`, with `reasonText` | Comment "attempt N: `<reasonText>`"; leave at `ready-for-agent`. |
+| `needs-info` | Transition to `needs-info`; comment with `reasonText`. Escalate (step 10). |
+
+Plus the untracked-escape comment from step 5 ("worker wrote files
+outside its worktree: `<paths>`"), appended to whichever class above
+applies for that worker.
+
+**Retry-budget exhaustion** — count failure-comments per issue (across this
+round and all prior rounds). A `failed` outcome whose new comment would push
+the total above `RETRY_BUDGET + 1` is exhausted: transition to `needs-info`
+*instead of* leaving at `ready-for-agent`, write a final comment naming the
+exhaustion, escalate (step 10), and count it once toward
+`MAX_CONSECUTIVE_FAILS`. (Local-markdown trackers count notes under
+`## Comments`; GitHub / GitLab count issue comments.)
+
+### 9 — Recover (only when step 7's gate was red)
+
+Convert a failing round into bounded progress with the recovery flow from
+[ADR 0006](../docs/adr/0006-orchestrator-owns-merge-and-transition.md).
+
+**A. Reset.** `git reset --hard <pre-wave-tip>` on the integration branch —
+deliberate, on your own worktree, your own recorded ref. The integration tip
+now equals the pre-wave tip; every merged-set branch is still reachable via
+its own ref.
+
+**B. Per-branch verify.** For each branch `B_i` in the merged set: reset the
+integration worktree to that branch (`git reset --hard <B_i>`), run the gate,
+then reset back to the pre-wave tip. *One* gate run per branch.
+
+- **Green** → `B_i` is a **survivor**.
+- **Red** → "post-hoc gate fail on isolation re-run." Boot the issue from
+  this round: it joins step 8's tracker writes as a `failed`-class entry
+  with `reasonText = "post-hoc gate fail on isolation re-run"`, leaves at
+  `ready-for-agent`, and counts toward retry budget like any other failure.
+
+**C. No survivors.** Every branch failed its own gate. The round makes no
+progress on `done`; the per-branch boot comments from B are the record. Skip
+to step 10.
+
+**D. Re-merge survivors and gate** — *only if at least one branch was booted
+at B* (otherwise the merged state would be identical to A's failing state,
+and re-trying loops). Merge each survivor with `git merge --no-ff`, then run
+the gate once.
+
+- **Green** → label every survivor `done` (this becomes their step-8 write).
+  Round passes.
+- **Red** → proceed to E.
+
+**E. Leave-one-out.** For each branch `B_i` in survivors: reset to the
+pre-wave tip, merge the `(|survivors| − 1)`-subset *excluding* `B_i`, run the
+gate. Stop at the first green.
+
+- **Green** → label that subset `done`. Comment on `B_i`'s issue ("passed
+  alone but breaks the wave; retry next round") and leave it at
+  `ready-for-agent`. Round passes.
+
+**F. Singleton fallback.** No `(|survivors| − 1)`-subset passed. Pick a
+single survivor (lowest issue number is fine), reset to the pre-wave tip,
+merge it alone, **gate it** — this final gate run is the consistency check
+on the exact tip being labelled, and matches the rest of the algorithm's
+`merge → gate → label` ordering. On green, label `done`; comment on every
+other survivor's issue ("passed alone but breaks the wave with siblings —
+retry next round"). Round passes with **1** issue done. If F's gate goes
+red (a flake or environment drift between B and F), `git reset --hard
+<pre-wave-tip>` to return the integration branch to a clean state, write no
+label, and let the round make no progress — next round's workers must
+branch off a known-green tip.
+
+Bounds: at most `2N + 3` gate runs per failing round (initial + N
+per-branch verifies + post-boot re-merge + N leave-one-out runs +
+singleton). The orchestrator **does not bisect**; it does not try subset
+sizes between `|survivors| − 1` and `1`. Deeper subset search is rejected
+on wall-time grounds (ADR 0006).
+
+All label-writes from this step batch into step 8's transition commit (for
+local-markdown) or fire as their own API calls (for GitHub / GitLab) — same
+verbs, same place. Do not write any label that did not follow a `merge →
+gate → label` ordering inside this recovery flow.
+
+### 10 — Wave summary, then escalations
+
+After step 8 (and step 9 if it ran), print the **wave summary**:
 
 - **Wall time** — `date +%s` minus the wave start time recorded in step 2.
-- **Per worker** — one line each: the issue, the outcome, and the
+- **Per worker** — one line each: the issue, the outcome class (after step-5
+  reclassification, step-6 merge result, and step-9 booting), and the
   `duration_ms` / `total_tokens` / `tool_uses` from that worker's `Agent`
   result `<usage>` block. A denied or crashed worker returns no `<usage>`
   block — just record its outcome.
-- **Aggregate** — wave number, issues attempted / done / failed, conflicts
-  booted, gate outcome.
+- **Aggregate** — wave number, issues attempted / labelled `done` /
+  merge-conflicted / exhausted / booted in recovery, and the gate outcomes
+  (step 7's gate plus any step-9 gates if recovery ran).
 
-### 8 — Escalation (non-blocking)
-
-When an issue is exhausted or returns `needs-info`, surface it **immediately**
+For each issue that was transitioned to `needs-info` in step 8 (whether by
+worker judgment or by retry-budget exhaustion), surface it **immediately**
 as plain text — `⚠ issue <id> needs you: <reason>` — and **keep going** with
 the rest of the queue. Do not block. Do not use `AskUserQuestion` mid-run.
 
 The user re-enters either by editing the issue or by sending a message — both
-are picked up in step 1. A `needs-info` issue can come back to life mid-run
-without stopping anything.
+are picked up in the next round's step 1. A `needs-info` issue can come
+back to life mid-run without stopping anything.
 
 Optionally fire a `PushNotification` on a **halt** or a **round summary** —
 never per issue (too noisy).
@@ -445,9 +600,10 @@ tip SHA, the worker timeout, and the **full text of `PROMPT.md`** (from this
 skill folder — a worker in a project worktree cannot see the skill folder, so
 you carry the doctrine to it).
 
-> Execute one issue from the project's issue tracker, fully. You are a worker
-> in a Ralph loop, running in your own isolated git worktree on your own
-> branch.
+> Execute one issue from the project's issue tracker. You are a worker in a
+> Ralph loop, running in your own isolated git worktree on your own branch.
+> Read the issue, implement it, gate locally, commit code only — the
+> orchestrator (not you) handles every tracker write after you report.
 >
 > First, set up your worktree — it was branched off a possibly-stale base:
 > run `git reset --hard <integration-tip>`. The tip SHA is inlined here by the
@@ -460,8 +616,8 @@ you carry the doctrine to it).
 > `/tmp/ralph-hook-probe-<your-branch-name>`. That path is outside your
 > worktree, so the hook must **reject** the write — a rejection is the success
 > signal, proceed. If the write instead **succeeds**, the hook is not
-> protecting this worktree: stop now, report `failed` with reason "path-guard
-> hook inactive", and do not start the issue.
+> protecting this worktree: stop now, report `outcome: failed` with
+> `reasonText: path-guard hook inactive`, and do not start the issue.
 >
 > Your worker doctrine — follow it exactly:
 >
@@ -476,11 +632,20 @@ you carry the doctrine to it).
 > --- END ISSUE ---
 >
 > Your time budget is `<WORKER_TIMEOUT>`. If you cannot finish within it, take
-> the failure path in the doctrine (write the note, leave the issue at
-> `ready-for-agent`) and stop.
+> the failure path in the doctrine (report `failed` with a one-line
+> `reasonText`) and stop.
 >
-> Report back tersely: outcome (done / failed / needs-info), your branch name,
-> and a one-line reason if not done. Do not narrate.
+> Report back tersely as three labelled lines the orchestrator can parse:
+>
+> ```
+> outcome: done | failed | needs-info
+> branch: <your-branch-name>
+> reasonText: <one line — required for failed / needs-info, omit for done>
+> ```
+>
+> For `failed`, name the gate command and the symptom in `reasonText` — the
+> orchestrator turns that line into the comment on the issue. Do not
+> narrate. Do not write to the issue yourself.
 
 ### Merge procedure — the orchestrator runs this directly
 
@@ -494,27 +659,32 @@ In the integration worktree, on the integration branch:
   `git clean` — then re-run the merge once. The named files are about to be
   written by the merge anyway, so removing them loses nothing.
 - Conflict → `git merge --abort` immediately. Do **not** resolve it; do not
-  edit any file. Boot the issue back to `ready-for-agent` (step 5).
+  edit any file. Mark the worker `merge-conflict` for step 8's transition;
+  do not write to the issue here.
 
 A clean `--no-ff` merge produces only a one-line commit summary — bounded
 output, safe for the orchestrator's context.
 
 ### Gate procedure — the orchestrator runs this directly
 
-In the integration worktree, on the integration branch, after all of the
-wave's merges have run. First perform the env-bootstrap step from
-`docs/agents/ralph.md`, if any — the **literal command, worktree-relative**,
-run in this integration worktree, never with reconstructed absolute paths.
-Then run each command in the gate from `docs/agents/ralph.md`, **in order,
-exactly as written** — one `Bash` call per command, bare and unmodified. No
-`env -i …` / `nice` / `timeout` / `xargs` wrappers. No `2>&1` / `>`
-redirects. No `| tail` / `| head` / `| grep` pipes to shrink or filter output
-— truncation is your job after the fact, not the command's. Reconstructing
-the gate (clean env, hermetic mode, terse output) is what makes it fail the
-allowlist in the first place; trust the literal text.
+Used by step 7 (gate the merged tip) and by step 9 (per-branch verify,
+re-merge gate, leave-one-out gate, singleton gate). In each case, the
+integration worktree has just been moved to the tip you want to gate
+(either the post-merge tip, or `git reset --hard <branch>` for a per-branch
+verify). First perform the env-bootstrap step from `docs/agents/ralph.md`,
+if any — the **literal command, worktree-relative**, run in this
+integration worktree, never with reconstructed absolute paths. Then run
+each command in the gate from `docs/agents/ralph.md`, **in order, exactly
+as written** — one `Bash` call per command, unmodified. Do not add `env -i`
+/ `nice` / `timeout` / `xargs` wrappers or `2>&1` / `| tail` / `| head` /
+`| grep` filters to "shrink" the output: you'd filter the failure signal
+you need to see, and the wrappers may not be allowlisted. Truncation is
+your job after the fact, not the command's. Trust the literal text.
 
-Read only pass/fail and (on red) the first failure. Do not fix anything; do not
-commit. Green → next round; red → revert-and-serialize (step 7).
+Read only pass/fail and (on red) the first failure. Do not fix anything; do
+not commit. Green → continue per the calling step; red → continue per the
+calling step (step 7's red goes to recovery, step 9's per-branch red boots
+that branch).
 
 ## Protected files — never modify
 
@@ -522,5 +692,6 @@ commit. Green → next round; red → revert-and-serialize (step 7).
   `docs/agents/ralph.md`, plus anything else `docs/agents/ralph.md` lists as a
   protected path.
 
-Issues *are* expected to change — transitioning statuses and ticking
-acceptance criteria is the loop.
+Issues *are* expected to change — transitioning statuses and writing comments
+is the loop's work, by your hand alone in step 8. Workers never touch the
+tracker (ADR 0006).

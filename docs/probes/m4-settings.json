@@ -1,27 +1,10 @@
 {
+  "_comment": "Group M, M4: probes whether Bash(rm:*) over-matches rmdir. Allowlist contains ONLY Bash(rm:*). If rmdir --help runs, the matcher does pure literal-prefix matching (security concern). If it denies, the matcher tokenises on word boundary (expected).",
   "permissions": {
     "defaultMode": "dontAsk",
     "allow": [
-      "Write",
       "Read",
-      "Edit",
-      "Glob",
-      "Grep",
-      "Agent",
-      "Bash(git:*)",
-      "Bash(rg:*)",
-      "Bash(ugrep:*)",
-      "Bash(grep:*)",
-      "Bash(find:*)",
-      "Bash(bfs:*)",
-      "Bash(cat:*)",
-      "Bash(head:*)",
-      "Bash(tail:*)",
-      "Bash(ls:*)",
-      "Bash(command -v:*)",
-      "Bash(which:*)",
-      "Bash(test:*)",
-      "Bash(echo:*)"
+      "Bash(rm:*)"
     ],
     "deny": [
       "Bash(git push:*)",

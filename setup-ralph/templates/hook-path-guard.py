@@ -13,7 +13,7 @@ it exits 0 silently so normal permission processing continues.
 
 Fail-open by design: if the event cannot be parsed or the worktree root cannot
 be resolved, the hook does not block. A crashing guard must never wedge an
-unattended run — step-5 detection in ORCHESTRATOR.md remains the backstop.
+unattended run — the orchestrator's post-wave escape checks are the backstop.
 """
 import json
 import os

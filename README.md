@@ -21,8 +21,7 @@ Two skills:
   instead of re-scaffolding.
 - **`orchestrate-ralph/`** — runs the loop. Reads `ORCHESTRATOR.md`, becomes
   the orchestrator, and dispatches workers until the queue is drained. Also
-  carries `PROMPT.md` (worker doctrine) and `watch-steps.py` (a terminal step
-  viewer for a run).
+  carries `PROMPT.md` (worker doctrine).
 
 ## Prerequisites
 
@@ -68,6 +67,5 @@ orchestrate-ralph/
 └── orchestrate-ralph/
     ├── SKILL.md
     ├── ORCHESTRATOR.md
-    ├── PROMPT.md
-    └── watch-steps.py
+    └── PROMPT.md
 ```
