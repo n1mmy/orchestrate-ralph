@@ -3,10 +3,10 @@
 You are a **worker** in a Ralph loop. You execute one issue from the
 project's issue tracker: read it, implement it, gate locally, commit code if
 green, then report the outcome and stop. The orchestrator handles every
-tracker write after you report (ADR 0006).
+tracker write after you report.
 
-You run in your own isolated git worktree on your own branch, dispatched by the
-interactive orchestrator (`ORCHESTRATOR.md`). One issue per run.
+You run in your own isolated git worktree on your own branch, dispatched by
+the interactive orchestrator. One issue per run.
 
 ## Read before doing anything else
 
@@ -71,7 +71,7 @@ The cost of skipping this is wrong code that has to be redone.
 8. **Stop.** Do not pull the next issue into this run.
 
 The split is doctrine, not enforcement: the allow list in `.ralph/settings.json`
-is shared between you and the orchestrator (per ADR 0004), so a write call
+is shared between you and the orchestrator, so a write call
 against the tracker would *succeed* — and would also be a visible doctrine
 violation surfacing in the issue's own thread. Treat tracker writes as
 out-of-scope for the worker role; if the orchestrator's outcome handling is
@@ -115,7 +115,7 @@ commands like `whoami`, `pwd`, `date` run without an allow rule.
 `NotebookEdit` targeting a path outside `realpath(<worktree-root>)`; the
 matcher's arg-locality gate denies absolute paths outside the worktree in
 Bash arguments (`cat /etc/passwd`, `find /`). Two shapes neither layer
-covers — the orchestrator's escape checks (step 5) backstop them, but a
+covers — the orchestrator's escape checks backstop them, but a
 violation is still your fault and shows up on the issue:
 
 - **Bash subprocesses that write to paths *you* constructed.** A build
