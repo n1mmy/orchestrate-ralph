@@ -17,16 +17,15 @@ The cost of skipping this is wrong code that has to be redone.
    this doctrine, they win.
 2. `docs/agents/ralph.md` — the verification gate you must pass, the env
    bootstrap step (if any), and the protected paths you must not touch.
-3. `docs/agents/issue-tracker.md`, its "Ralph loop" section — only the
-   **discover** and **read** operations apply to you. **Dependencies** and
-   **feature grouping** are how the orchestrator picks the wave; you do not
-   evaluate them. **Transition** and **comment** are the orchestrator's
-   alone (ADR 0006); you never call them.
-4. `docs/agents/domain.md` and what it points at (`CONTEXT.md`, ADRs) — the
+3. `docs/agents/domain.md` and what it points at (`CONTEXT.md`, ADRs) — the
    project's domain language. Use those terms in code, tests, and copy; do not
    invent synonyms.
-5. The issue itself — implement exactly what it says, including any
-   `## Comments` failure notes from prior attempts.
+4. The issue itself — the orchestrator inlined its full text in your
+   dispatch prompt. Implement exactly what it says, including any
+   prior-attempt failure notes already in the body. You do not need
+   `docs/agents/issue-tracker.md` — discover / transition / comment are all
+   the orchestrator's job (ADR 0006), and your issue's text is already in
+   your prompt.
 
 ## One issue per run
 
