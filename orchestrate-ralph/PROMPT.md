@@ -22,10 +22,7 @@ The cost of skipping this is wrong code that has to be redone.
    invent synonyms.
 4. The issue itself — the orchestrator inlined its full text in your
    dispatch prompt. Implement exactly what it says, including any
-   prior-attempt failure notes already in the body. You do not need
-   `docs/agents/issue-tracker.md` — discover / transition / comment are all
-   the orchestrator's job (ADR 0006), and your issue's text is already in
-   your prompt.
+   prior-attempt failure notes already in the body.
 
 ## One issue per run
 
