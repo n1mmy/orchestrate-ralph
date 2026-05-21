@@ -68,13 +68,12 @@ Walk the user through these one at a time — present, get an answer, move on:
   and tracker commands still need allow entries (above and below); mode only
   changes what happens for everything *else*. Present both, default `dontAsk`.
 - **Tracker writes** — note (no user choice here, just an FYI) that the
-  orchestrator handles every tracker write itself since ADR 0006, so
-  `.ralph/settings.json` will gain the tracker's read **and** write verbs
-  (e.g. `gh issue edit`, `gh issue comment` for GitHub). The exact set is
-  derived from the tracker detected in step 1 and shown in the
-  `.ralph/settings.json` preview before writing. Workers under doctrine
-  call only the read verbs; the shared allow list grants both because the
-  file is shared (ADR 0004).
+  orchestrator handles every tracker write itself, so `.ralph/settings.json`
+  will gain the tracker's read **and** write verbs (e.g. `gh issue edit`,
+  `gh issue comment` for GitHub). The exact set is derived from the
+  tracker detected in step 1 and shown in the `.ralph/settings.json`
+  preview before writing. Workers under doctrine call only the read
+  verbs; the shared allow list grants both because the file is shared.
 
 ### 3. Write
 
@@ -94,11 +93,11 @@ Walk the user through these one at a time — present, get an answer, move on:
      every worker runs that bootstrap in its own worktree under this
      allowlist, so it needs an entry just like a gate command. The
      orchestrator also runs the bootstrap; one shared `.ralph/settings.json`
-     applies to both since ADR 0004.
-  3. **Tracker verbs** — per ADR 0006, the orchestrator handles every
-     tracker write itself, so `.ralph/settings.json` needs the verbs for
-     **both** worker-side reads and orchestrator-side writes. Pick the
-     block matching the tracker chosen in step 2:
+     applies to both.
+  3. **Tracker verbs** — the orchestrator handles every tracker write
+     itself, so `.ralph/settings.json` needs the verbs for **both**
+     worker-side reads and orchestrator-side writes. Pick the block
+     matching the tracker chosen in step 2:
 
      - **local-markdown** — no extra entries. Reads use `Read`; writes use
        `Edit` + `Bash(git:*)` (committing the transition commit on the
@@ -140,6 +139,22 @@ its broad worker allowlist would leak into their everyday sessions. The
 `orchestrate-ralph` skill places `.ralph/settings.json` there at run time in a
 fresh worktree — and treats a pre-existing, differing `settings.local.json` as
 a fatal "checkout not clean enough" error.
+
+**A file sees only its own landing folder.** Three landing surfaces:
+`setup-ralph/templates/*` lands inside the user's repo at fresh setup;
+`setup-ralph/*` and `orchestrate-ralph/*` ship into
+`~/.claude/skills/<skill>/` (the skill folder only — the repo's
+`docs/` tree does **not** ship with them); `PROMPT.md` is inlined
+verbatim into the worker's dispatch prompt, where the reader is in the
+user's repo. None of those landings include this repo's `docs/`. So
+none of these files may cross-reference into `docs/adr/`,
+`docs/permission-matcher-tests.md`, or any other repo-root doc —
+`../docs/...` resolves to nothing once installed. Internal step
+numbers between files (e.g. `step 8` from setup-ralph pointing at an
+ORCHESTRATOR.md section) are also dead links across the skill
+boundary. A grep for `\.\./docs`, `docs/adr/`, `step [0-9]` over
+`setup-ralph/`, `orchestrate-ralph/`, and the templates is a quick
+pre-commit smoke test; same-folder links (`./other-file.md`) are fine.
 
 ### 4. Done
 

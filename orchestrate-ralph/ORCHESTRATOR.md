@@ -120,8 +120,8 @@ harness isolates every sub-agent and so none of these can be delegated:
   and re-run the gate to isolate which branch(es) cause the failure. Pass/fail
   only; on a per-branch red you boot the issue.
 - **Tracker writes in the transition phase** (step 8). Workers never write to
-  the tracker (ADR 0006); every label flip, status edit, and comment happens
-  here, by your direct hand. The verbs differ per tracker (`gh issue edit` /
+  the tracker; every label flip, status edit, and comment happens here, by
+  your direct hand. The verbs differ per tracker (`gh issue edit` /
   `glab issue update` / `Edit` + `git commit` on the issue file); the
   authority is uniform. `docs/agents/issue-tracker.md`'s "Ralph loop" lists
   this repo's commands — its **Transition** and **Comment** rows are the
@@ -147,10 +147,8 @@ absolute paths outside the integration worktree in args, or any unexpanded
 `$VAR`; any first token containing `/` (`/usr/bin/git` denied even with
 `Bash(git:*)`); and the explicit denies on `cd`, `git -C`, and remote-git.
 Denials surface as clean "Denied by permissions" tool errors under
-`dontAsk`. The full empirical model is in
-[`docs/permission-matcher-tests.md`](../docs/permission-matcher-tests.md);
-the project's allow list lives in `.ralph/settings.json` (= the placed
-`.claude/settings.local.json`).
+`dontAsk`. The project's allow list lives in `.ralph/settings.json`
+(= the placed `.claude/settings.local.json`).
 
 ## Local git only — never contact a remote
 
@@ -354,9 +352,9 @@ branch: <name>
 reasonText: <one line>      (present for failed / needs-info; absent for done)
 ```
 
-Treat the report as structured input. Workers do not write to the tracker
-(ADR 0006); there is no `Status:` line to read on the worker's branch, and
-no `## Comments` note for you to compare against. The report is your only
+Treat the report as structured input. Workers do not write to the tracker;
+there is no `Status:` line to read on the worker's branch, and no `##
+Comments` note for you to compare against. The report is your only
 account of what happened *inside* the worker; the worker's branch is your
 only durable artifact for what it built. Both are read with `git` /
 `<gh|glab>` from your own integration worktree — **never by reading inside
@@ -381,9 +379,15 @@ Reclassify two cases before moving on:
 
 ### 6 — Merge `done`-reporting workers' branches
 
-For each worker whose collected outcome is `done` (after step 5's
-reclassification), merge into the integration branch using the merge
-procedure below.
+**Merge order matters in a multi-worker wave.** Sort `done`-reporting
+workers descending by count of prior `merge-conflict` comments on the
+issue (from this round's tracker reload in step 1), ties broken by
+lowest issue number. A repeatedly-conflicting issue goes first this
+round, so a hot-file loser eventually gets in instead of starving while
+peers merge clean.
+
+For each worker in that order (after step 5's reclassification), merge
+into the integration branch using the merge procedure below.
 
 - **Clean merge** → record the worker in the **merged set** for this wave.
 - **Aborts citing *untracked working tree files would be overwritten*** —
@@ -423,8 +427,8 @@ single authoritative gate of the round.
 - **Red** → a cross-issue break slipped past the workers' own gates (e.g.
   issue A changed a signature, issue B in another file called it; git merged
   clean, the build broke). Go to **step 9 (recover)**. Do not write `done`
-  for anyone yet — per ADR 0006 the label is written only when the
-  integration tip containing the worker's branch gates green.
+  for anyone yet — the label is written only when the integration tip
+  containing the worker's branch gates green.
 
 If the merged set is empty (every worker reported `failed`, `needs-info`, or
 merge-conflicted), skip the gate — there is nothing new to verify. Go
@@ -466,8 +470,7 @@ exhaustion, escalate (step 10), and count it once toward
 
 ### 9 — Recover (only when step 7's gate was red)
 
-Convert a failing round into bounded progress with the recovery flow from
-[ADR 0006](../docs/adr/0006-orchestrator-owns-merge-and-transition.md).
+Convert a failing round into bounded progress.
 
 **A. Reset.** `git reset --hard <pre-wave-tip>` on the integration branch —
 deliberate, on your own worktree, your own recorded ref. The integration tip
@@ -521,7 +524,7 @@ Bounds: at most `2N + 3` gate runs per failing round (initial + N
 per-branch verifies + post-boot re-merge + N leave-one-out runs +
 singleton). The orchestrator **does not bisect**; it does not try subset
 sizes between `|survivors| − 1` and `1`. Deeper subset search is rejected
-on wall-time grounds (ADR 0006).
+on wall-time grounds.
 
 All label-writes from this step batch into step 8's transition commit (for
 local-markdown) or fire as their own API calls (for GitHub / GitLab) — same
@@ -694,4 +697,4 @@ that branch).
 
 Issues *are* expected to change — transitioning statuses and writing comments
 is the loop's work, by your hand alone in step 8. Workers never touch the
-tracker (ADR 0006).
+tracker.

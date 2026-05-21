@@ -21,7 +21,7 @@ orchestrator can't transition the issue", "the orchestrator was denied on
 The whole class is a **shape mismatch** between an allow entry in
 `.ralph/settings.json` (= the placed `.claude/settings.local.json`) and the
 command actually called. Both the worker and the orchestrator run under that
-same file since ADR 0004, so either side can hit the denial; under
+same file, so either side can hit the denial; under
 `permissions.defaultMode: dontAsk` (the default) the denial is a clean tool
 error, under `default` it prompts the session running. Either way the
 underlying fix is the same — get the exact denied command string first,
@@ -35,10 +35,10 @@ Candidate causes, distinguished by comparing that string to `settings.json`:
 | Command not allowlisted at all | no `allow` entry matches the command's first token | Add `Bash(<whole command>:*)`. |
 | Allowlisted with the wrong shape | entry is a first-token grant (`Bash(pnpm:*)`) but policy wants the whole command, or vice versa | Rewrite the entry as the **whole gate command** as a `:*` prefix. |
 | Worker command ≠ gate command | the worker ran `pnpm test --filter x`; `ralph.md` / the entry say `pnpm test` | Reconcile: fix `ralph.md`'s gate line, or broaden the entry to the shape actually run. |
-| Subshell or path-locality denial | the string has `$(...)` / backticks, or contains an absolute path outside the worktree, or an unexpanded `$VAR`, or a first token containing `/` | These are matcher-level shape denials no allow entry can rescue; rewrite the command in `ralph.md` to avoid the shape. See [`docs/permission-matcher-tests.md`](../../docs/permission-matcher-tests.md) for the catalog. |
+| Subshell or path-locality denial | the string has `$(...)` / backticks, or contains an absolute path outside the worktree, or an unexpanded `$VAR`, or a first token containing `/` | These are matcher-level shape denials no allow entry can rescue; rewrite the command in `ralph.md` to avoid the shape. |
 | Separator chain with an unallowlisted segment | the string has `&&` / `\|` / `;` / `\|\|` chaining commands, and at least one segment is unallowlisted | The matcher decomposes separators and checks each segment, so the denial is on the segment, not on the chain itself. Allowlist the segment, or rewrite the gate command to use only allowlisted ones. |
 | Test runner shells out | the gate command passes, but it spawns a second binary (`node`, `docker`, `tsx`) that is what got denied | Allowlist the spawned binary too. Running the gate command yourself surfaces this. |
-| **Tracker-write verb not allowlisted** (new under ADR 0006) | the *orchestrator* is denied on `gh issue edit` / `glab issue update` / `gh issue comment` / `glab issue note` — the verbs it uses in step 8 (transition) and step 9's tracker writes | Add the matching tracker verb to `allow` as a whole-command `:*` prefix. See `setup-ralph` [SKILL.md](./SKILL.md#3-write)'s "Tracker verbs" group for the per-tracker list. A re-run of `setup-ralph` does this automatically. |
+| **Tracker-write verb not allowlisted** | the *orchestrator* is denied on `gh issue edit` / `glab issue update` / `gh issue comment` / `glab issue note` — the verbs it uses to transition issues and write recovery comments | Add the matching tracker verb to `allow` as a whole-command `:*` prefix. See `setup-ralph` [SKILL.md](./SKILL.md#3-write)'s "Tracker verbs" group for the per-tracker list. A re-run of `setup-ralph` does this automatically. |
 | **Tracker-read verb not allowlisted** | the *worker* is denied on `gh issue view` / `glab issue view` reading its issue at dispatch time | Same fix — add the read verb to `allow`. The verb is part of the per-tracker group in `setup-ralph`'s template; if it is missing, the settings file predates that template. |
 
 Verify: the new entry is a whole-command `:*` prefix, not a first-token grant,

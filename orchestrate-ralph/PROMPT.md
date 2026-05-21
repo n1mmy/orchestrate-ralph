@@ -3,10 +3,10 @@
 You are a **worker** in a Ralph loop. You execute one issue from the
 project's issue tracker: read it, implement it, gate locally, commit code if
 green, then report the outcome and stop. The orchestrator handles every
-tracker write after you report (ADR 0006).
+tracker write after you report.
 
-You run in your own isolated git worktree on your own branch, dispatched by the
-interactive orchestrator (`ORCHESTRATOR.md`). One issue per run.
+You run in your own isolated git worktree on your own branch, dispatched by
+the interactive orchestrator. One issue per run.
 
 ## Read before doing anything else
 
@@ -17,16 +17,12 @@ The cost of skipping this is wrong code that has to be redone.
    this doctrine, they win.
 2. `docs/agents/ralph.md` — the verification gate you must pass, the env
    bootstrap step (if any), and the protected paths you must not touch.
-3. `docs/agents/issue-tracker.md`, its "Ralph loop" section — only the
-   **discover** and **read** operations apply to you. **Dependencies** and
-   **feature grouping** are how the orchestrator picks the wave; you do not
-   evaluate them. **Transition** and **comment** are the orchestrator's
-   alone (ADR 0006); you never call them.
-4. `docs/agents/domain.md` and what it points at (`CONTEXT.md`, ADRs) — the
+3. `docs/agents/domain.md` and what it points at (`CONTEXT.md`, ADRs) — the
    project's domain language. Use those terms in code, tests, and copy; do not
    invent synonyms.
-5. The issue itself — implement exactly what it says, including any
-   `## Comments` failure notes from prior attempts.
+4. The issue itself — the orchestrator inlined its full text in your
+   dispatch prompt. Implement exactly what it says, including any
+   prior-attempt failure notes already in the body.
 
 ## One issue per run
 
@@ -75,7 +71,7 @@ The cost of skipping this is wrong code that has to be redone.
 8. **Stop.** Do not pull the next issue into this run.
 
 The split is doctrine, not enforcement: the allow list in `.ralph/settings.json`
-is shared between you and the orchestrator (per ADR 0004), so a write call
+is shared between you and the orchestrator, so a write call
 against the tracker would *succeed* — and would also be a visible doctrine
 violation surfacing in the issue's own thread. Treat tracker writes as
 out-of-scope for the worker role; if the orchestrator's outcome handling is
@@ -119,7 +115,7 @@ commands like `whoami`, `pwd`, `date` run without an allow rule.
 `NotebookEdit` targeting a path outside `realpath(<worktree-root>)`; the
 matcher's arg-locality gate denies absolute paths outside the worktree in
 Bash arguments (`cat /etc/passwd`, `find /`). Two shapes neither layer
-covers — the orchestrator's escape checks (step 5) backstop them, but a
+covers — the orchestrator's escape checks backstop them, but a
 violation is still your fault and shows up on the issue:
 
 - **Bash subprocesses that write to paths *you* constructed.** A build
