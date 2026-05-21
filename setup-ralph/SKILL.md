@@ -141,6 +141,32 @@ its broad worker allowlist would leak into their everyday sessions. The
 fresh worktree — and treats a pre-existing, differing `settings.local.json` as
 a fatal "checkout not clean enough" error.
 
+**Templates are user-repo content.** Every file under
+`setup-ralph/templates/` lands in the user's repo, verbatim or with the
+per-tracker tailoring above — the tracker fragments append to
+`docs/agents/issue-tracker.md`, `hook-path-guard.py` becomes
+`.ralph/hook-path-guard.py`, `ralph.md` becomes `docs/agents/ralph.md`,
+`settings.template.json` becomes `.ralph/settings.json`. Treat any template
+edit like a customer-facing doc edit:
+
+- **No relative cross-references into the orchestrate-ralph package.** A
+  `[ADR 0006](../adr/...)` link in a template resolves to a path the
+  user's repo does not have. The same goes for any `./` or `../` path
+  into `setup-ralph/` or `orchestrate-ralph/`.
+- **No skill-internal step numbers** (`step 8`, `step 9 E/F`). They
+  point at `ORCHESTRATOR.md` sections the user cannot see from their
+  copy. Use phase names instead (*"after the wave is merged and the
+  gate is green"*) — those carry meaning without a cross-reference.
+- **No worker/orchestrator role split in operation-level templates.**
+  The tracker fragment describes *operations*; who calls each is package
+  doctrine and lives in `PROMPT.md` / `ORCHESTRATOR.md`.
+
+The dividing line is whether the file gets copied at setup time. Files
+that stay in the `setup-ralph/` package — `SKILL.md`,
+`repair-symptoms.md`, this paragraph itself — may cite ADRs and step
+numbers freely. A grep for `step [0-9]` or `adr/` over `templates/` is
+a quick smoke test before committing template changes.
+
 ### 4. Done
 
 Tell the user setup is complete, and suggest they **commit the scaffolded
