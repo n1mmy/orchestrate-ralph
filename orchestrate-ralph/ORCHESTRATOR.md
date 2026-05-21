@@ -381,9 +381,15 @@ Reclassify two cases before moving on:
 
 ### 6 — Merge `done`-reporting workers' branches
 
-For each worker whose collected outcome is `done` (after step 5's
-reclassification), merge into the integration branch using the merge
-procedure below.
+**Merge order matters in a multi-worker wave.** Sort `done`-reporting
+workers descending by count of prior `merge-conflict` comments on the
+issue (from this round's tracker reload in step 1), ties broken by
+lowest issue number. A repeatedly-conflicting issue goes first this
+round, so a hot-file loser eventually gets in instead of starving while
+peers merge clean.
+
+For each worker in that order (after step 5's reclassification), merge
+into the integration branch using the merge procedure below.
 
 - **Clean merge** → record the worker in the **merged set** for this wave.
 - **Aborts citing *untracked working tree files would be overwritten*** —
