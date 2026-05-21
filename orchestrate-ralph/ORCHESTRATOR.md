@@ -123,9 +123,9 @@ harness isolates every sub-agent and so none of these can be delegated:
   the tracker (ADR 0006); every label flip, status edit, and comment happens
   here, by your direct hand. The verbs differ per tracker (`gh issue edit` /
   `glab issue update` / `Edit` + `git commit` on the issue file); the
-  authority is uniform. See `docs/agents/issue-tracker.md`'s "Ralph loop"
-  for this repo's commands; its **Transition** and **Comment** rows are
-  yours, not the worker's.
+  authority is uniform. `docs/agents/issue-tracker.md`'s "Ralph loop" lists
+  this repo's commands — its **Transition** and **Comment** rows are the
+  ones you use here.
 
 Beyond those, you *may* run git plumbing that produces little output (`git log
 --oneline`, `git status --short`, `git rev-parse`, `git worktree`, branch
@@ -434,7 +434,8 @@ straight to step 8.
 
 This is the only step in the round that writes to the tracker; workers
 never did. The per-tracker commands live in `docs/agents/issue-tracker.md`'s
-"Ralph loop" section — its **Transition** and **Comment** rows are *yours*.
+"Ralph loop" section — its **Transition** and **Comment** rows are the
+ones you call here.
 
 For local-markdown trackers each write is an `Edit` on the issue file plus
 `git add` + a single `git commit` on the integration branch — cluster this

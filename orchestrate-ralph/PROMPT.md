@@ -18,8 +18,9 @@ The cost of skipping this is wrong code that has to be redone.
 2. `docs/agents/ralph.md` — the verification gate you must pass, the env
    bootstrap step (if any), and the protected paths you must not touch.
 3. `docs/agents/issue-tracker.md`, its "Ralph loop" section — only the
-   **read** operations apply to you (discover, read, dependencies, feature
-   grouping). The transition and comment operations are the orchestrator's
+   **discover** and **read** operations apply to you. **Dependencies** and
+   **feature grouping** are how the orchestrator picks the wave; you do not
+   evaluate them. **Transition** and **comment** are the orchestrator's
    alone (ADR 0006); you never call them.
 4. `docs/agents/domain.md` and what it points at (`CONTEXT.md`, ADRs) — the
    project's domain language. Use those terms in code, tests, and copy; do not
