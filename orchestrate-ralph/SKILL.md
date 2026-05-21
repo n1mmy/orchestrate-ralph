@@ -1,11 +1,13 @@
 ---
 name: orchestrate-ralph
-description: Run a Ralph loop as an interactive orchestrator that dispatches worker sub-agents in parallel waves to grind a project's issue tracker to done. Use when asked to "orchestrate ralph", run the Ralph loop, or drive the issue tracker with sub-agents.
+description: Run a Ralph loop as an interactive orchestrator that dispatches one worker sub-agent per round to grind a project's issue tracker to done. Use when asked to "orchestrate ralph", run the Ralph loop, or drive the issue tracker with sub-agents.
 ---
 
 # Orchestrate Ralph
 
-Run the interactive Ralph orchestrator over this repo's issue tracker.
+Run the interactive Ralph orchestrator over this repo's issue tracker. This is
+the canonical single-worker loop; for parallel-wave mode (multiple workers per
+round), see `/orchestrate-ralph-parallel`.
 
 ## Prerequisites — check first, stop if any is missing
 
@@ -18,14 +20,14 @@ no `Bash` is needed at all.
    `.ralph/settings.json` must both exist. If not, tell the user to run
    `setup-ralph` (and `setup-matt-pocock-skills` before it) and stop.
 2. **You are on a clean, dedicated integration branch — ideally in a separate
-   worktree.** The branch you are on becomes the integration branch: workers
-   branch off it, merges land on it, and `git reset --hard` may run on it
-   (the recovery flow rolls back failing merges). So it must not be the
-   repo's default branch (`main` / `master`), the working tree must be
-   clean, and it should be a branch the user is happy to hand back. A fresh
-   `git worktree` satisfies all of this and keeps the run off the user's
-   primary checkout — strongly preferred. If you are in the primary
-   checkout, stop and ask before proceeding.
+   worktree.** The branch you are on becomes the integration branch: the
+   worker branches off it, its merge lands on it, and `git reset --hard` may
+   run on it (a red gate rolls integration back to the pre-round tip). So
+   it must not be the repo's default branch (`main` / `master`), the
+   working tree must be clean, and it should be a branch the user is happy
+   to hand back. A fresh `git worktree` satisfies all of this and keeps the
+   run off the user's primary checkout — strongly preferred. If you are in
+   the primary checkout, stop and ask before proceeding.
 
 ## Session setup — placement and restart
 
@@ -95,6 +97,6 @@ Read `ORCHESTRATOR.md` (in this skill folder) in full and become the
 orchestrator it describes. Run that loop until a stop condition fires.
 
 `ORCHESTRATOR.md` is the single source of truth for the loop's behaviour —
-wave selection, dispatch, retries, merge and gate-verify, escalation, stop
+issue selection, dispatch, retries, merge and gate-verify, escalation, stop
 conditions. This skill only points at it; do not paraphrase or second-guess it
 here.
