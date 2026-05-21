@@ -44,13 +44,43 @@ actually used parallelism.
    reset-to-tip preamble, same root-pin, same path-guard self-test, same
    report shape. The harness's `isolation: "worktree"` creates a fresh
    worktree branched off a possibly-stale base regardless of N, so the
-   reset preamble is necessary at N=1 too.
+   reset preamble is necessary at N=1 too. The symlink is a dev-time
+   DRY convenience for the maintainer; at install time it is fine for
+   the installer to either preserve the symlink or flatten it into two
+   physical copies. Doctrine is N-invariant, so the two copies cannot
+   drift toward different content. There is no partial-install hazard
+   and no `cp -a` requirement.
 
-5. **Worker still runs in `isolation: "worktree"` in single mode.** The
-   merge step survives as a trivial fast-forward: the worker resets to
-   the integration tip before working, so the merge cannot conflict by
-   construction. Rollback on red-gate is `git reset --hard
+5. **Worker still runs in `isolation: "worktree"` in single mode.** This
+   is an integrity property, not a maintenance choice. The worker's
+   branch tip is the **only** channel through which work crosses to the
+   orchestrator; the worker physically cannot leave
+   edited-but-uncommitted or written-but-not-`git add`-ed files in the
+   integration worktree to silently colour the orchestrator's re-gate.
+   The merge step survives as a trivial fast-forward: the worker resets
+   to the integration tip before working, so the merge cannot conflict
+   by construction. Rollback on red-gate is `git reset --hard
    <pre-worker-tip>` on integration.
+
+   The orchestrator re-gates on the post-worker tip even though the
+   worker already gated locally, because four independent vectors
+   motivate it:
+
+   1. **Working-tree residue.** A worker that edited a file but
+      committed only a subset would leave the gate green against a
+      dirty tree. Worktree isolation closes this vector at the
+      boundary — the re-gate is what *verifies* the boundary held.
+   2. **Allowlist gaps.** The worker may have had a permission the
+      orchestrator's enforced settings revoke; the re-gate runs under
+      the orchestrator's settings.
+   3. **A wrapper the worker silently dropped.** If gate doctrine
+      prescribes `script/check` and the worker ran the bare tool, the
+      re-gate (using the prescribed wrapper) catches it.
+   4. **Flake masked at worker stage.** A test that passed once for
+      the worker is run again from a clean tip.
+
+   On red, the round made no progress and the issue stays at
+   `ready-for-agent` (counts toward retry budget).
 
 6. **Worker branches are deleted at end-of-round.** In both modes, after
    all tracker writes are complete (post step 8 in single mode; post
@@ -102,10 +132,12 @@ actually used parallelism.
   `diff`; the policy is "single skill is authoritative for shared
   mechanics; parallel skill's matching sections must track."
 
-- **`PROMPT.md` symlink behaviour at install time.** The skill installer
-  must resolve the relative symlink correctly. The existing pattern
-  (symlink-from-worktree-to-`~/.claude/skills/`) handles this; no new
-  install machinery needed.
+- **`PROMPT.md` install shape is unconstrained.** Whether the installer
+  preserves the symlink (dev `~/.claude/skills/` symlink workflow) or
+  flattens it into two physical copies (zip extract, naive `cp`,
+  Windows target without symlink support), both skills resolve their
+  PROMPT.md locally and run. No new install machinery, no `cp -a`
+  requirement.
 
 - **`CONTEXT.md` "Wave vs. round" entry becomes parallel-skill-only.**
   The wave vocabulary survives only where it's load-bearing; the
