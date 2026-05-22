@@ -53,7 +53,9 @@ and minimal-allowlist probe configurations, see
 7. **When a test requires a different allowlist shape** than the one
    loaded, edit `.claude/settings.local.json`, exit claude, re-launch,
    confirm enforcement again, then run the test. Settings are read at
-   startup only.
+   startup only. The "Settings configurations" subsection below groups
+   the catalog into five compatible configs (S1–S5) so the full run
+   needs no more than five swaps.
 
 ### Outcome categories
 
@@ -74,25 +76,86 @@ the supposedly-denying allow rule *added*: if the outcome is Allowed,
 the original deny was "allow rule missing"; if it's still Denied,
 the original was "deny rule."
 
+### Settings configurations and swap order
+
+Running the full catalog requires placing a few distinct
+`.claude/settings.local.json` shapes and restarting claude between
+each — settings are read at session start only, so a mid-session
+edit doesn't take effect. The configurations below cover every probe
+group in **five placements**, picked so each config can hold a
+large block of mutually-compatible rules without making any probe's
+Allowed outcome co-attributable across rules. The base of every
+config is the standard template's deny block + path-guard hook
+(with `EXTRA_ALLOWED_ROOTS = ["/tmp/whitelisted"]` so Group H's H4
+variant runs alongside H1–H3 without a hook-file swap).
+
+**S1 — matcher base (`:*` variants)** covers Groups A, B, D, E, F,
+N, H, Bp, Cs, plus T1/T3/T4 and M1/M2.
+
+Allow: `Bash(rmdir:*)`, `Bash(xprobe one:*)`, `Bash(echo:*)`,
+`Bash(ls:*)`, `Bash(git:*)`, top-level `Write`, top-level `Edit`.
+
+**S2 — exact rules (no `:*`)** covers Cr1–Cr9 and C5–C9.
+
+Allow: `Bash(rmdir)`, `Bash(xprobe one)`, top-level `Write`,
+top-level `Edit`. The bare-name rules behave differently from their
+`:*` counterparts (Cr and C5–C9 prove exact ≠ `:*`), so the `:*`
+rules must be **absent** here.
+
+**S3 — minimal echo-only** covers T1–T5, M0, and Group Bg.
+
+Allow: `Bash(echo:*)` only. No `Write`, no `Edit` (so T2 and T5
+genuinely probe matcher gating instead of finding the rule in
+allow), no `Bash(rmdir:*)` (so M0's "rmdir not on safe list"
+precondition holds), no `Bash(git:*)` (so Bg can enumerate the
+git safe list without confounding rules in scope).
+
+**S4 — `Bash(rm:*)` only** covers M4.
+
+Allow: `Bash(rm:*)` only. Distinct from S3 because M4 tests
+word-boundary tokenisation of `Bash(rm:*)` against `rmdir`, and the
+short-form rule must be present for the probe to discriminate
+"word-boundary tokenisation" from "pure literal-prefix matching."
+
+**S5 — `Bash(git status:*)` only** covers M5 and Bm1–Bm17.
+
+Allow: `Bash(git status:*)` only. The template deny block stays so
+Bm17's `Bash(git push:*)` deny-rule control fires.
+
+**Suggested swap order**: S1 (large majority of rows) → S2 → S3 → S4
+→ S5. Each transition is exit + edit `.claude/settings.local.json`
++ re-launch + confirm enforcement. The H4-variant `EXTRA_ALLOWED_ROOTS`
+boundary lives in the hook file, not in settings, so a hook-file
+edit doesn't strictly require restart; but for predictability the
+operator may restart anyway.
+
+The Allow column on each catalog row still names the load-bearing
+rule the probe depends on, not the full config in scope. That
+column is the falsifiable claim; the configs above are the operator
+shortcut.
+
 ### Driving the catalog with a Claude session
 
 Paste the prompt below into a fresh Claude Code session launched in
 the probe worktree under the settings allow list the first group
-needs. The session will run probes, classify outcomes, fill Empirical
-cells, and pause when the next group needs a different allow list.
+needs (S1 in the suggested order above). The session will run
+probes, classify outcomes, fill Empirical cells, and pause when the
+next group needs a different config.
 
 ```text
 You're filling in the Empirical column of the catalog in
-docs/permission-matcher-tests.md. For each probe row:
+docs/permission-matcher-tests.md. The "Settings configurations" section
+defines five named configs (S1–S5) that cover all probe groups.
+You're under one of them now.
 
-1. Compare the row's Allow column against the current
-   .claude/settings.local.json. If they differ, STOP and tell me
-   which settings to place and restart you under — claude reads
-   settings at session start only.
-2. Confirm enforcement is active: run `cd .` as a bare Bash call.
-   It must error "Denied by permissions" with no prompt. A prompt
-   means STOP; the session isn't enforced and the outcomes are
-   meaningless.
+For each probe row in the group(s) the current config covers:
+
+1. Confirm enforcement: run `cd .` as a bare Bash call. It must
+   error "Denied by permissions" with no prompt. A prompt means
+   STOP; the session isn't enforced and outcomes are meaningless.
+2. Sanity-check the row's Allow column against the current config.
+   If the row needs a rule that isn't in scope (per the S1–S5
+   definitions), STOP and tell me which config you need next.
 3. Run the probe's Command exactly as written. Classify the result
    into Allowed / Denied (allow rule missing) / Denied (deny rule) /
    Prompted, per the four outcome buckets in the Procedure section.
@@ -109,10 +172,9 @@ unexpectedly Allows. DO NOT adjust arguments to "make a probe pass";
 a probe failing to deny as expected is itself the load-bearing
 falsification.
 
-Start with whichever group's allow list is currently placed and
-work through its rows. After each group, summarise what ran, what
-diverged, and pause so I can swap settings + restart you under the
-next group's allow list before continuing.
+After finishing all rows the current config covers, summarise what
+ran, what diverged, and pause so I can swap settings + restart you
+under the next config in the suggested order (S1 → S2 → S3 → S4 → S5).
 ```
 
 The operator's job: launch the probe session under the right
