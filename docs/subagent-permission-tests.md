@@ -20,6 +20,105 @@ ADR 0004's previously-open item ("worker hook propagation under
 enforced parents has not been re-verified end-to-end") is closed as
 of 2026-05-22 — see "Resolved 2026-05-22" further down.
 
+## Baseline — settings load and subagent enforcement
+
+We believe the following hold across the harness configurations this
+doc tests. Each is hedged because Claude Code's exact harness behaviour
+is undocumented and may drift between versions; the Scenarios and
+Rejected variants below are the ground-truth observation rows.
+
+### Settings load model (current understanding)
+
+- Claude reads `.claude/settings.local.json` at session start only. A
+  mid-session placement or edit is **not** re-read; the session must
+  exit and re-launch for changes to take effect.
+- All four enforcement mechanisms — `allow` list, `deny` block,
+  `defaultMode: "dontAsk"`, and the `PreToolUse` path-guard hook —
+  load from this file at startup and apply for the lifetime of the
+  session.
+
+### Subagent enforcement propagation (current understanding)
+
+Propagation depends on the parent's enforcement state at the parent's
+startup, not on what the parent has done since. Two regimes:
+
+- **Enforced parent** (settings.local.json placed before the parent's
+  claude launch) + `subagent_type: "claude"` + `isolation: "worktree"`
+  → deny block, `dontAsk` auto-deny, and the path-guard hook all
+  propagate to the worker. The worker re-reads the placed file at its
+  own spawn-time startup; this is the mechanism, not pure inheritance
+  from the parent process. Confirmed end-to-end in Scenario 1's
+  2026-05-22 evidence row.
+- **Unenforced parent** (no settings.local.json at parent's startup,
+  then placed mid-session) + any `subagent_type` + any `isolation` →
+  none of the four mechanisms propagate. The parent never loaded the
+  file, and the subagent inherits the parent's empty enforcement
+  state. Confirmed across four (subagent_type × isolation)
+  combinations in Rejected variants V1–V4.
+
+### Subagent tool inventory (current understanding)
+
+The `Agent` tool is filtered from every subagent's inventory under
+every observed combination of `subagent_type` and `isolation`,
+regardless of the parent's enforcement state. Orchestrator-as-subagent
+remains **structurally impossible**: a subagent cannot dispatch a
+sub-subagent. The harness system prompt may report `Tools: *` for some
+subagent types; empirically `Agent` is filtered out.
+
+### Auto-isolation is subagent-type-dependent
+
+- `claude` and `Explore`: auto-isolate to `.claude/worktrees/agent-<id>`
+  even with no explicit `isolation` flag.
+- `general-purpose`: no auto-isolation; subagent shares the parent's
+  cwd.
+- `isolation: "worktree"` explicitly forces a worktree regardless of
+  subagent_type. Worker dispatch should always set this flag explicitly
+  — relying on auto-isolation by type is a regression vector if
+  defaults change.
+
+### Deny shapes — message-form distinctions
+
+Probes here must distinguish at least four outcomes; the message form
+is the only signal that tells them apart:
+
+- **Allowed** — call ran without prompting.
+- **Denied (deny rule)** — the matcher hit a `deny` entry. Distinct
+  message form: `"Permission to use Bash with command <X> has been
+  denied."`
+- **Denied (allow rule missing)** — `dontAsk` auto-denied because
+  nothing matched allow + safe list. Generic message form:
+  `"Permission to use Bash has been denied because Claude Code is
+  running in don't ask mode."`
+- **Denied (path-guard hook)** — `Write`/`Edit`/`NotebookEdit`
+  resolved outside the boundary. **Branded `Path-guard:` prefix** in
+  the error string; unforgeable by any other gate.
+- **Prompted** — the call surfaced a user prompt. Enforcement is not
+  in effect for this layer; **STOP and re-verify setup**. A
+  prompted-then-denied outcome is not the same as an enforced deny —
+  approving the prompt corrupts the data by running the call under
+  the operator's interactive approval instead of the configuration
+  under test.
+
+### Prove enforcement before relying on downstream tests
+
+A short prerequisite probe, run end-to-end before the first Scenario
+of a session:
+
+1. Launch claude in the probe worktree with the standard template
+   placed at `.claude/settings.local.json` and the hook at
+   `.ralph/hook-path-guard.py`.
+2. Dispatch P1 (`Bash cd .`) — must hit the deny block with the
+   "with command cd . has been denied" form. **No prompt.**
+3. Dispatch P2 (`Write /tmp/probe-<sha>.txt`) — must surface the
+   branded `Path-guard:` denial. **No prompt.**
+4. Dispatch P3 (`Bash env`) — must hit `dontAsk` with the "don't
+   ask mode" form. **No prompt.**
+
+A prompt at any step means the session is not enforced; exit,
+re-launch, retry. Three distinct deny shapes confirm all three
+gates are loaded; missing any one falsifies the Baseline regime
+above before downstream Scenarios run.
+
 ## Setup — scaffolding the probe environment
 
 Each test runs in a directory with two files:
@@ -150,25 +249,15 @@ succeeded; P4 reported `Agent` absent.
 Result: isolated cwd. P1 succeeded; P2 prompted with no hook message; P3
 succeeded; P4 reported `Agent` absent.
 
-#### Findings across V1–V4 (verbatim from the falsifying session)
+#### Findings across V1–V4
 
-- **No subagent variant has the `Agent` tool.** Subagent type and
-  isolation flag are both irrelevant. The orchestrator-as-subagent
-  architecture cannot dispatch workers — structurally impossible in this
-  Claude Code version. (System prompt may say `Tools: *` for some
-  types; empirically the `Agent` tool is filtered out.)
-- **The `deny` block does not propagate to subagents.** A deny-block
-  command ran in all four variants without even prompting.
-- **`dontAsk` does not propagate.** Unallowlisted commands ran in all
-  four variants without prompting.
-- **The path-guard hook does not fire for subagents.** Every P2 was
-  blocked only by a normal user-permission prompt; none surfaced the
-  branded `"Path-guard: …"` message.
-- **Auto-isolation is type-dependent.** `claude` and `Explore` subagents
-  auto-isolate; `general-purpose` does not. Worker dispatch must always
-  set `isolation: "worktree"` explicitly. (This contradicts an older
-  `ORCHESTRATOR.md` harness-assumption line; the line has been
-  corrected.)
+The four V1–V4 result paragraphs above are the dated evidence rows
+that established the structural facts now in
+[Baseline](#baseline--settings-load-and-subagent-enforcement):
+no subagent variant has the `Agent` tool, no enforcement mechanism
+propagates from an unenforced parent, and auto-isolation is
+subagent-type-dependent. Re-run V1–V4 if a Claude Code version bump
+suggests any of those Baseline claims may have drifted.
 
 ## Reading probe responses
 
