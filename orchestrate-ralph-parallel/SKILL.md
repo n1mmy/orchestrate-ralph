@@ -1,13 +1,15 @@
 ---
-name: orchestrate-ralph
-description: Run a Ralph loop as an interactive orchestrator that dispatches one worker sub-agent per round to grind a project's issue tracker to done. Use when asked to "orchestrate ralph", run the Ralph loop, or drive the issue tracker with sub-agents.
+name: orchestrate-ralph-parallel
+description: Run a Ralph loop in parallel-wave mode (multiple worker sub-agents per round). Requires `parallel-safe: true` in `docs/agents/ralph.md`. For the single-worker (canonical) loop, see `/orchestrate-ralph`.
 ---
 
-# Orchestrate Ralph
+# Orchestrate Ralph (parallel)
 
-Run the interactive Ralph orchestrator over this repo's issue tracker. This is
-the canonical single-worker loop; for parallel-wave mode (multiple workers per
-round), see `/orchestrate-ralph-parallel`.
+Run the interactive Ralph orchestrator over this repo's issue tracker, in
+parallel-wave mode.
+
+Accepts an optional argument **`N`** — the wave width (default `5`). The
+orchestrator passes this through as `MAX_PARALLEL`.
 
 ## Prerequisites — check first, stop if any is missing
 
@@ -26,14 +28,20 @@ failure. For the file-existence checks in item 1, prefer `Read` or `Glob`
    `.ralph/settings.json` must both exist. If not, tell the user to run
    `setup-ralph` (and `setup-matt-pocock-skills` before it) and stop.
 2. **You are on a clean, dedicated integration branch — ideally in a separate
-   worktree.** The branch you are on becomes the integration branch: the
-   worker branches off it, its merge lands on it, and `git reset --hard` may
-   run on it (a red gate rolls integration back to the pre-round tip). So
-   it must not be the repo's default branch (`main` / `master`), the
-   working tree must be clean, and it should be a branch the user is happy
-   to hand back. A fresh `git worktree` satisfies all of this and keeps the
-   run off the user's primary checkout — strongly preferred. If you are in
-   the primary checkout, stop and ask before proceeding.
+   worktree.** The branch you are on becomes the integration branch: workers
+   branch off it, merges land on it, and `git reset --hard` may run on it
+   (the recovery flow rolls back failing merges). So it must not be the
+   repo's default branch (`main` / `master`), the working tree must be
+   clean, and it should be a branch the user is happy to hand back. A fresh
+   `git worktree` satisfies all of this and keeps the run off the user's
+   primary checkout — strongly preferred. If you are in the primary
+   checkout, stop and ask before proceeding.
+3. **The repo declares itself parallel-safe.** `docs/agents/ralph.md` must
+   contain `parallel-safe: true`. If absent or `false`, stop and tell the
+   user that this repo's tracker has no readable dependency relation
+   suitable for parallel waves — run `/orchestrate-ralph` instead. This
+   flag is a capability declaration; the single-worker skill does not
+   read it.
 
 ## Session setup — placement and restart
 
@@ -51,7 +59,7 @@ Three states:
 1. **`.claude/settings.local.json` does not exist.** Copy
    `.ralph/settings.json` to it. Then **halt with restart instructions:**
    *"Settings placed. Exit claude (`/quit`) and re-launch it from this
-   worktree, then run `/orchestrate-ralph` again. Claude Code loads settings
+   worktree, then run `/orchestrate-ralph-parallel` again. Claude Code loads settings
    at session startup; this session predates the placement."*
 
 2. **It exists and differs from `.ralph/settings.json`.** Never touch it
@@ -64,7 +72,7 @@ Three states:
    starter scaffolding claude auto-created in this worktree — not
    accumulated history. In that case, halt with a *suggestion* the user
    can take or leave: they may remove the file (`rm
-   .claude/settings.local.json`) and re-run `/orchestrate-ralph`, which
+   .claude/settings.local.json`) and re-run `/orchestrate-ralph-parallel`, which
    will place `.ralph/settings.json` and prompt for the claude restart;
    make explicit that you are not doing this yourself because the file
    *might* still be valuable to them. If the file is substantial — many
@@ -103,6 +111,6 @@ Read `ORCHESTRATOR.md` (in this skill folder) in full and become the
 orchestrator it describes. Run that loop until a stop condition fires.
 
 `ORCHESTRATOR.md` is the single source of truth for the loop's behaviour —
-issue selection, dispatch, retries, merge and gate-verify, escalation, stop
+wave selection, dispatch, retries, merge and gate-verify, escalation, stop
 conditions. This skill only points at it; do not paraphrase or second-guess it
 here.

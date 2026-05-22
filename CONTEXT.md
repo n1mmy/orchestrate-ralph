@@ -10,12 +10,14 @@ one git repository.
   Claude Code loads settings at session startup, so this session runs under
   the **enforced permission environment**: the allowlist, the remote-git
   `deny` block, `dontAsk` default mode, and the path-guard hook. The
-  session reads `ORCHESTRATOR.md` and "becomes" the orchestrator,
-  dispatching workers wave by wave until a stop condition fires.
+  session reads its skill's `ORCHESTRATOR.md` and "becomes" the
+  orchestrator, dispatching workers round by round (one worker per round
+  in the canonical single-worker skill; multiple per wave in the parallel
+  skill) until a stop condition fires.
 
 - **Worker** — a foreground `Agent` subagent spawned by the orchestrator
-  with `isolation: "worktree"`, one per issue per wave. Each worker runs
-  in its own throwaway git worktree on its own branch and inherits the
+  with `isolation: "worktree"`, one per issue. Each worker runs in its
+  own throwaway git worktree on its own branch and inherits the
   orchestrator's enforced permissions one nesting level deeper.
 
 An earlier design considered a three-layer architecture (user session →
@@ -25,49 +27,90 @@ falsified the propagation that design relied on — see ADR 0004 and
 `orchestrator-as-subagent-plan.md`. The two-layer model with **restart after
 placement** achieves the same enforcement without the architectural cost.
 
-## Wave vs. round
+## Single mode vs. parallel mode
 
-`ORCHESTRATOR.md` uses **wave** (the set of workers dispatched together)
-and **round** (one full step-1-to-step-8 pass) almost interchangeably.
-A round contains exactly one wave; they share a clock. A round has a
-sequence of phases (see "Round phases" below); the wave is the first
-two phases (dispatch + collect).
+The package ships two orchestrator skills, picked per invocation:
+
+- **`/orchestrate-ralph`** (canonical) — dispatches one worker per round.
+  No wave, no merge-ordering, no per-branch recovery. The worker resets to
+  the integration tip before working, so the merge is a fast-forward by
+  construction. A red gate rolls integration back to the pre-round tip
+  and the issue stays at `ready-for-agent`. The `parallel-safe` flag in
+  `docs/agents/ralph.md` is ignored.
+- **`/orchestrate-ralph-parallel`** (opt-in) — dispatches multiple workers
+  per **wave** (N concurrent foreground `Agent` calls in one message).
+  Requires `parallel-safe: true` (the repo's tracker exposes a readable
+  dependency relation). Adds merge-ordering by prior conflict count, and
+  a per-branch verify / leave-one-out / singleton recovery flow on red
+  gates. See ADR 0006 for the recovery algorithm and ADR 0007 for the
+  split rationale.
+
+Doctrine for the orchestrator and worker is N-invariant on shared
+mechanics (prerequisites, session setup, gate procedure, transition,
+stop conditions, protected files, local-git-only, harness assumptions,
+permission matcher); the parallel skill diverges only where N>1
+constructs are load-bearing. The single-worker skill is the source of
+truth; the parallel skill's matching sections track it.
+
+## Wave (parallel skill only) vs. round
+
+In the **single-worker** skill there is just **round**: one full
+step-1-to-step-9 pass containing exactly one dispatched worker. The
+word "wave" does not appear in that skill's `ORCHESTRATOR.md`.
+
+The **parallel** skill adds **wave** — the set of workers dispatched
+together within a round. There, `ORCHESTRATOR.md` uses *wave* and
+*round* almost interchangeably: a round contains exactly one wave;
+they share a clock. A round has a sequence of phases (see "Round
+phases" below); the wave is the first two phases (dispatch + collect).
 
 ## Round phases
 
-A round runs in order: **dispatch** → **collect** → **merge** → **gate** →
-**transition** → (**recover** if gate red). The orchestrator owns every
-phase from merge onwards; workers only participate in dispatch and
-collect.
+The orchestrator owns every phase from merge onwards; workers only
+participate in dispatch and collect.
+
+A **single-mode** round runs in order: **dispatch** → **collect** →
+**merge** → **gate** → **transition**. A red gate triggers a
+pre-round-tip reset inside the transition; there is no separate
+recovery phase.
+
+A **parallel-mode** round adds an optional **recover** phase that runs
+when the post-merge gate is red:
+
+**dispatch** → **collect** → **merge** → **gate** → **transition** →
+(**recover** if gate red).
 
 - **Dispatch** — orchestrator discovers eligible issues per the tracker,
-  spawns one worker per issue with `isolation: "worktree"`.
+  spawns one or more workers (one in single mode; up to `MAX_PARALLEL`
+  in parallel mode) with `isolation: "worktree"`.
 - **Collect** — orchestrator awaits worker outcomes:
   `{ outcome: done | failed | needs-info, reasonText?: string }`.
   Workers do not write to the tracker; their report is the only output.
 - **Merge** — orchestrator attempts a git merge of each `done`-reporting
-  worker's branch into the integration tip. Conflicts are per-issue
-  failures (comment + leave at `ready-for-agent`), not round failures.
+  worker's branch into the integration tip. In single mode the merge is
+  a fast-forward by construction (the worker reset to the tip before
+  working). In parallel mode, conflicts are per-issue failures (comment
+  + leave at `ready-for-agent`), not round failures.
 - **Gate** — orchestrator runs the project gate **once** on the
   post-merge integration tip. This is the only gate the orchestrator
   runs in the normal path.
 - **Transition** — on gate green, the merged subset's issues are
   labelled `done`; per-issue `needs-info` and `failed` outcomes from
   collect get their respective writes (or no-op). Comments are written
-  here too — failure-reason text from worker reports, conflict notes
-  from merge, recovery breadcrumbs from recover.
-- **Recover** — runs only when the merge-tip gate goes red. The
-  orchestrator reverts to the pre-wave tip, re-gates each merged branch
-  alone, **boots** any whose individual gate now fails, then re-tries
-  the merge with **survivors** (the branches that passed the per-branch
-  re-gate). If the survivor-merge still fails the gate, one pass of
-  leave-one-out tries each (S-1)-subset; if none pass, a singleton
-  fallback merges one survivor, gates that merge, and labels on green —
-  typically making at least one issue's worth of progress per round
-  (a flake or environment drift at the singleton gate can still
-  produce a no-progress round). No subset sizes between 1 and S-1 are
-  explored. Every label-writing step follows `merge → gate → label`.
-  See ADR 0006 for the full algorithm.
+  here too — failure-reason text from worker reports, and (in parallel
+  mode) conflict notes from merge and recovery breadcrumbs from recover.
+- **Recover** *(parallel mode only)* — runs when the merge-tip gate
+  goes red. The orchestrator reverts to the pre-wave tip, re-gates each
+  merged branch alone, **boots** any whose individual gate now fails,
+  then re-tries the merge with **survivors** (the branches that passed
+  the per-branch re-gate). If the survivor-merge still fails the gate,
+  one pass of leave-one-out tries each (S-1)-subset; if none pass, a
+  singleton fallback merges one survivor, gates that merge, and labels
+  on green — typically making at least one issue's worth of progress
+  per round (a flake or environment drift at the singleton gate can
+  still produce a no-progress round). No subset sizes between 1 and
+  S-1 are explored. Every label-writing step follows `merge → gate →
+  label`. See ADR 0006 for the full algorithm.
 
 ## Write authority
 
