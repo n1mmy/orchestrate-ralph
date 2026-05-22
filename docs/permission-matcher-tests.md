@@ -197,16 +197,16 @@ assumption; the doc is most useful once each row has a result.
 
 | # | Assumption | Where it lives | Test(s) | Status |
 |---|---|---|---|---|
-| 1 | `:*` after a command name allowlists "any suffix" | `setup-ralph/SKILL.md` step 3; common template entries like `Bash(git:*)` | A1–A5 (confounded); Bm Denied cases (discriminating) | partial — A1–A5 used `echo` which Baseline lists as safe-listed, so the Allowed outcomes are co-attributable to safe list OR rule and don't validate `:*` matching on their own. Discriminating evidence is on the rule's *negative* side: Bm9–Bm11 (word-boundary on both the first-token and trailing edges), Bm16 (multi-word rules position-locked at argv 0/1). Bounded by the path-locality gate: B3 falsifies "any suffix" for absolute paths outside the worktree when the command is on the §2 path-typed list (`ls`, `cat`, `head`, `tail`, `wc`, `grep`, `find`, `stat`); Bm14 shows §2 does NOT fire for commands off that list — see Findings §2. |
-| 2 | A bare command name with no `:*` is an exact match | `Bash(date +%s)` in the template uses this shape | C3, C4 superseded; Cr1–Cr9; D1–D5 for multi-word | **confirmed** (2026-05-22) — single-word: Cr1 Allowed (`rmdir` bare matches the exact rule); Cr2–Cr9 all Denied (any suffix — flag, positional, empty quoted arg, extra whitespace — fails the exact match). Multi-word: D1 Allowed (`pnpm typecheck` bare matches); D2/D3 Denied (`pnpm typecheck --watch`, `pnpm typecheck src` both rejected). The earlier "falsified" reading was a safe-list confound: `Bash(date +%s)` couldn't be isolated because `date` is safe-listed, and `Bash(echo)` couldn't either because `echo` is safe-listed too. Using non-safe-listed targets gives clean tests and the assumption holds for both single-word and multi-word exact-match rules. |
-| 3 | Compound shapes (`&&` / `||` / `;` / pipes / redirects / subshells) are distinct patterns from their parts and fail when not explicitly allowlisted | `ORCHESTRATOR.md` "Bash command shape"; `PROMPT.md` "Bash command shape"; the live-run-doctrine commits | D1–D6, E1–E7, R19–R23 | confirmed — every stage of a compound (whether `&&` / `;` / pipe) must independently clear allow-or-safe-list AND the §2 path-locality gate. R19 (`echo hello \| env` Denied), R21 (`env \| echo hi` Denied), R23 (`echo hello \| cat /etc/issue` Denied) lay this out for pipes; D1–D6 covered the other separators. E5/E6 confirm subshells don't bypass. D3's earlier "Allowed" anomaly was the safe-list, not pipe-decomposition. |
-| 4 | The matcher decomposes `&&`-chained compounds and checks each half against allow + deny | `ORCHESTRATOR.md` step 6 implicitly; permission-denied worker doctrine | D1, D2, D3 | confirmed — D2 catches a deny on the right half; follow-up probe `echo a && env` is denied because `env` is denied alone. D3 was Allowed only because the right half is on the built-in safe list. |
-| 5 | A flag-bearing variant of an allowlisted command (e.g. `ls -la`) is matched by `Bash(<cmd>:*)` | various template entries assume this | B1, B2, B4–B7 superseded; Bm1–Bm17 | confirmed — Bm1–Bm6 confirm `:*` accepts arbitrary suffix (flags, `=`-suffixed flags, multiple flags). Bm9–Bm11 confirm strict word-boundary on both sides. Bm14 confirms §2 is command-specific (does not fire for `git status`). Bm16 confirms multi-word rules are position-locked at argv 0/1 — a leading flag like `git -c X status` does NOT match `Bash(git status:*)`. Group B's original B4–B7 (`Bash(ls -la:*)`) were superseded by Group Bm using a non-safe-listed target because Session A confirmed `ls` is safe-listed. |
+| 1 | `:*` after a command name allowlists "any suffix" | `setup-ralph/SKILL.md` step 3; common template entries like `Bash(git:*)` | A1–A5 | pending — Group A reframed to `Bash(rmdir:*)`, all probes unrun. Multi-word `:*` semantics confirmed independently via Group Bm: Bm9–Bm11 (word-boundary on both first-token and trailing edges) and Bm16 (position-locked at argv 0/1). Bounded by §2 path-locality: under `:*`, absolute outside-cwd paths still deny for commands on the §2 list (Baseline). B3 will re-probe this boundary for `rmdir` under an explicit allow rule. |
+| 2 | A bare command name with no `:*` is an exact match | `Bash(date +%s)` in the template uses this shape | Cr1–Cr9 (single-word `rmdir`); C5, D2–D5 (multi-word `pnpm typecheck`) | **confirmed** — single-word: Cr1 Allowed (bare matches the exact rule); Cr2–Cr9 all Denied (any suffix — flag, positional, empty quoted arg, extra whitespace — fails the exact match). Multi-word: C5 Allowed (bare matches); D2–D5 all Denied (flag, positional, bare leader, different subcommand). Both targets are non-safe-listed per Baseline so Allowed outcomes attribute to the rule. |
+| 3 | Compound shapes (`&&` / `||` / `;` / pipes / redirects / subshells) are distinct patterns from their parts and fail when not explicitly allowlisted | `ORCHESTRATOR.md` "Bash command shape"; `PROMPT.md` "Bash command shape" | D1–D6, E1–E6 (rmdir-based, unrun); D6–D10, D-bonus (pnpm-based, confirmed) | confirmed at the multi-word leading-stage level via the pnpm-typecheck rows in Group E: D6 (`pnpm typecheck \| env` Denied), D7 (with stderr redirect, Denied), D9 (`pnpm typecheck && env` Denied), D-bonus (`pnpm typecheck \| cat /tmp/x` Denied via §2 on downstream stage). Each demonstrates per-stage gating regardless of where the matching stage lives. Subshell rejection preserved as Cross-cutting Finding §5. The reframed D1, D3–D6 / E1–E6 (rmdir-based) are unrun — re-running will close the loop for single-word leading stages. |
+| 4 | The matcher decomposes `&&`-chained compounds and checks each half against allow + deny | `ORCHESTRATOR.md` step 6 implicitly; permission-denied worker doctrine | D2 (deny on right), D9 (allow-missing on right) | confirmed — D2 (rmdir-based, unrun) probes the deny-rule case on the right half; D9 (`pnpm typecheck && env`, confirmed Denied) probes the allow-missing case on the right half. Either suffices to falsify "matcher treats `&&` as one shape"; together they cover both denial mechanisms. |
+| 5 | A flag-bearing variant of an allowlisted command (e.g. `rmdir --help`) is matched by `Bash(<cmd>:*)` | various template entries assume this | B1, B2, B4; Bm1–Bm17 | confirmed at the multi-word level via Bm1–Bm6 (`:*` accepts flags, `=`-suffixed flags, multiple flags). Bm9–Bm11 confirm strict word-boundary on both sides; Bm14 confirms §2 is command-specific; Bm16 confirms position-locking at argv 0/1. Single-word side reframed to `Bash(rmdir:*)` (Group B), all probes unrun — pending re-probe to close the loop for short-command `:*` rules. |
 | 6 | Worker subagents launched with `isolation: "worktree"` inherit the orchestrator's loaded `.claude/settings.local.json` (allowlist, deny, `dontAsk`, hook) | `ORCHESTRATOR.md` prereq #2; ADR 0004 | Session F (2026-05-22) — see `docs/subagent-permission-tests.md` "Resolved 2026-05-22" section | **confirmed end-to-end**. All four mechanisms propagate: deny block (P1 `git remote -v` clean deny), `dontAsk` (P3 `env` clean deny), path-guard hook with branded `Path-guard:` message (P2 `Write /tmp/...` — load-bearing test), and auto-isolation cwd (P5). `Agent` tool is NOT in any subagent's inventory under any variant (P4 + V1–V4), so orchestrator-as-subagent remains structurally impossible. |
 | 7 | Top-level tools (`Write`, `Read`, `Edit`, `Agent`, `Glob`, `Grep`) need explicit allow entries under `dontAsk`, else they auto-deny | settings template lists them; ADR 0004 names `Agent` as the load-bearing one | T1–T5 | **falsified for most tools — split into per-tool behaviour** (see Findings §4). Gated: `Write` (T2), `Edit` (T5). Auto-permitted under `dontAsk`: `Read` (T3), `Agent` (T1), `NotebookEdit` (T4). Unobservable on this host: `Glob`, `Grep` (the v2.1.117+ Linux build drops them entirely). Practical impact: the template's `Read`/`Agent`/`Glob`/`Grep` entries are dead weight under `dontAsk`; `Write`/`Edit` are load-bearing. |
 | 8 | `dontAsk` causes any unallowlisted call to auto-deny as a tool error (no prompt) | `ORCHESTRATOR.md`; setup-ralph "worker permission mode" prose; ADR 0004 | covered by every catalog test — the procedure's enforcement-confirmation step is the canonical case | confirmed — every `cd .`, `env`, `rm`, `mkdir`, `claude --version`, `ls /tmp`, `ls /` produced "Denied by permissions" with no prompt; refinements: "unallowlisted" excludes (a) the built-in Bash safe-command list and (b) the auto-permitted top-level tools `Read`/`Agent`/`NotebookEdit` (see Findings §4). |
 | 9 | The `PreToolUse` path-guard hook fires for `Write` / `Edit` / `NotebookEdit` whose target resolves outside `realpath(cwd)` | `setup-ralph/templates/hook-path-guard.py`; ADR 0002 | H1–H6 | confirmed for **`Write`** (H1–H4 plus H4-control-1/2/3 in Session E 2026-05-22). `Edit` not directly probed but the hook code is symmetric (same `GUARDED` set). **`NotebookEdit` unconfirmed** (H6) — the tool's read-before-write validator runs first and shadows any hook visibility; needs a two-step probe to settle. `EXTRA_ALLOWED_ROOTS` widening works precisely (H4 Allowed; H4-control-1's prefix-confusion attack stopped by the `+ os.sep` boundary). |
-| 10 | Glob expansion / quoting / env-var expansion in the command don't change which allow rule matches | implicit; no specific doctrine, but assumed by `Bash(echo:*)` matching `echo "hello world"` etc. | F1–F4 (F1/F2 confounded) | partially falsified — F1 (`echo "hello world"`) and F2 (`echo *`) used `echo` which Baseline lists as safe-listed, so their Allowed outcomes don't validate that quoting / glob are transparent to the matcher; only the negative side fires discriminatingly. F3 (`echo $HOME`) Denied: unexpanded `$VAR` triggers a distinct shape-rejection (same gate that blocks absolute external paths). F4 (`echo \$HOME`) Allowed: escaping the `$` removes the variable reference. Quoting / glob transparency to the matcher remains untested against a non-safe-listed target. |
+| 10 | Glob expansion / quoting / env-var expansion in the command don't change which allow rule matches | implicit; no specific doctrine, but assumed by `Bash(<cmd>:*)` matching `<cmd> "hello world"` etc. | F1–F4 | pending — Group F reframed to `Bash(rmdir:*)` with all probes unrun. The `$VAR`-shape rejection is the load-bearing falsification: previously observed with `echo $HOME` Denied, preserved as principle in Findings §2 (gate fires on unexpanded `$VAR` tokens). New F3 uses `$PWD` (expands inside cwd) so the Denied attribution will isolate `$VAR` from §2's outside-cwd path rejection. F4 escapes the `$` to test that the shape rejection lifts. |
 | 11 | A command invoked by full path (e.g. `/usr/bin/git`) is "a different, unrecognised shape" and fails to match the allow rule for the bare command name | `PROMPT.md:93–94`; `ORCHESTRATOR.md:110` ("never run a command by full path") | N1–N6 | confirmed — but the rationale is sharper than the doctrine states. N5 shows the gate fires even for an absolute path **inside** the worktree, so it isn't the argument-path gate (§2) re-firing on the first token. It is a separate name-shape lookup: any `/` in the first token (`/abs/path` or `./relative`) makes the lookup miss against both the allow list and the safe list. |
 | 12 | Multi-word `:*` prefixes in allow / deny rules (`Bash(git push:*)`, `Bash(git status:*)`) match exactly the multi-word prefix plus any suffix, and do not match unrelated subcommands | `setup-ralph/templates/settings.template.json` deny block (`Bash(git push:*)`, `Bash(git fetch:*)`, etc.); template-mode prose | M1, M2, M5 | confirmed — multi-word `:*` matches the prefix plus any suffix and does not over-match unrelated subcommands, on both sides. M1/M2 cover the **deny** side (`Bash(git push:*)` denied `git push --help`; did not over-match `git status`). M5 covers the **allow** side (`Bash(git status:*)` allowed `git status --short` with no `Bash(git:*)` present to confound). |
 | 13 | `Bash(<cmd>:*)` matches strictly the first-token command name, not arbitrary first-token text starting with `<cmd>` (i.e., the matcher tokenises on word boundary, so `Bash(rm:*)` does not match `rmdir`) | Implicit everywhere a short command is allowlisted via `:*` (`Bash(rm:*)` would be problematic if it over-matched `rmdir`); also a security-relevant property of every `Bash(<short>:*)` rule | M4 | confirmed via M4 — word-boundary tokenisation, not pure literal-prefix matching. With `Bash(rm:*)` as the only allow rule, `rmdir --help` was Denied. `Bash(<short>:*)` rules are scoped to the exact command name as intended. |
@@ -232,36 +232,43 @@ subsection of Baseline lists canonical picks (`yes`, `env`, `rmdir`,
 genuine no-op under Claude Code (cwd does not persist across `Bash`
 calls).
 
-### Group A — `:*` prefix matching (assumption #1)
+### Group A — `:*` accepts arbitrary suffix (assumption #1)
+
+Target: `Bash(rmdir:*)`. `rmdir` is not on the Bash safe list (see
+Baseline), so Allowed outcomes attribute unambiguously to the `:*`
+rule. Probes use nonexistent directory names so the underlying `rmdir`
+errors safely after the matcher passes (rmdir prints "No such file or
+directory" without side effect).
 
 | ID | Allow | Command | Expected | Empirical |
 |---|---|---|---|---|
-| A1 | `Bash(echo:*)` | `echo` | Allowed | Allowed (2026-05-20) |
-| A2 | `Bash(echo:*)` | `echo hello` | Allowed | Allowed (2026-05-20) |
-| A3 | `Bash(echo:*)` | `echo hello world` | Allowed | Allowed (2026-05-20) |
-| A4 | `Bash(echo:*)` | `echo "hello world"` (quoted) | Allowed | Allowed (2026-05-20) |
-| A5 | `Bash(echo:*)` | `  echo hello` (leading whitespace) | Allowed | Allowed (2026-05-20) |
+| A1 | `Bash(rmdir:*)` | `rmdir` (bare; matcher passes, rmdir errors "missing operand") | Allowed | |
+| A2 | `Bash(rmdir:*)` | `rmdir probe-a2-dne` (single positional) | Allowed | |
+| A3 | `Bash(rmdir:*)` | `rmdir probe-a3-dne-1 probe-a3-dne-2` (multiple positionals) | Allowed | |
+| A4 | `Bash(rmdir:*)` | `rmdir "probe a4 dne"` (quoted positional with space) | Allowed | |
+| A5 | `Bash(rmdir:*)` | `  rmdir probe-a5-dne` (leading whitespace) | Allowed | |
 
-### Group B — flag-arg variants (assumption #5)
+### Group B — flag-bearing variants and §2 boundary (assumption #5; §2 for path-typed commands)
+
+Target: `Bash(rmdir:*)`. B1/B2 test that `:*` accepts flag-bearing
+suffix shapes. B3 probes whether the §2 path-locality gate fires for
+`rmdir` outside the worktree — Baseline lists `rmdir` on the §2
+command list, but the §2 finding so far covers it only under safe-list
+attribution; B3 isolates §2 under an explicit allow rule. `/etc` is
+the safety net: even if the matcher unexpectedly allows, rmdir refuses
+on a non-empty directory.
 
 | ID | Allow | Command | Expected | Empirical |
 |---|---|---|---|---|
-| B1 | `Bash(ls:*)` | `ls` | Allowed | Allowed (2026-05-20) |
-| B2 | `Bash(ls:*)` | `ls -la` | Allowed | Allowed (2026-05-20) |
-| B3 | `Bash(ls:*)` | `ls /tmp` (positional arg) | Allowed | **Denied** (2026-05-20) — absolute path outside the worktree. Probes during this run: `ls .`, `ls README.md`, `ls docs`, `ls /home/ubuntu/data/local/orchestrate-ralph` all Allowed; `ls /tmp`, `ls /usr/bin`, `ls /etc`, `ls /home` (ancestor of worktree), `ls /` all Denied. The gate is "absolute path not contained by `realpath(cwd)`" — ancestor paths count as outside, not just sibling paths. |
-| B4 | `Bash(ls -la:*)` | `ls -la` | Allowed | **superseded** — `ls` is on the Bash safe list (see Baseline), so any `ls -la …` probe would be Allowed regardless of the multi-word rule. Multi-word allow semantics are now covered by Group Bm using a non-safe-listed target (`Bash(git status:*)`). |
-| B5 | `Bash(ls -la:*)` | `ls -lah` | Allowed | superseded — see B4. |
-| B6 | `Bash(ls -la:*)` | `ls -al` (flag order swapped) | Allowed | superseded — see B4. |
-| B7 | `Bash(ls -la:*)` | `ls -la /tmp` (positional after flags) | Allowed | superseded — see B4. |
+| B1 | `Bash(rmdir:*)` | `rmdir --help` (single flag) | Allowed | |
+| B2 | `Bash(rmdir:*)` | `rmdir -p probe-b2-dne` (flag + positional) | Allowed | |
+| B3 | `Bash(rmdir:*)` | `rmdir /etc` (outside-cwd absolute) | Denied by §2 | |
+| B4 | `Bash(rmdir:*)` | `rmdir probe-b4-dne` (cwd-relative) | Allowed | |
 
 ### Group C — exact match, no `:*` (assumption #2)
 
 | ID | Allow | Command | Expected | Empirical |
 |---|---|---|---|---|
-| C1 | `Bash(echo)` | `echo` | Allowed | superseded (2026-05-22) — `echo` is on the built-in safe list (Cs1 below), so `Bash(echo)` cannot be discriminated from "no rule + safe list" with this target. See Cr1–Cr9 for exact-match probes with `Bash(rmdir)` (a non-safe-listed target). |
-| C2 | `Bash(echo)` | `echo hello` | Denied (allow rule missing) | superseded — see C1; Cs2 below confirms `echo hello` also runs via safe list with no rule. |
-| C3 | `Bash(date +%s)` | `date +%s` | Allowed | Allowed (2026-05-20) — but follow-up probes show `date`, `date +%Y` also Allowed, so the rule is not load-bearing; `date` is on the built-in safe-command list |
-| C4 | `Bash(date +%s)` | `date +%s -u` | Denied | **Allowed** (2026-05-20) — same: `date` is on the built-in safe list |
 | C5 | `Bash(pnpm typecheck)` | `pnpm typecheck` | Allowed | Allowed (2026-05-22) — D1: bare multi-word matches the exact rule. Underlying pnpm errored (no package.json) but the matcher decided before exec. |
 | C6 | `Bash(pnpm typecheck)` | `pnpm typecheck 2>&1 \| tail -30` | Denied | Expected revised after `tail` confirmed safe-listed in Session A. **Allowed** (2026-05-22) — D8: both pipeline stages clear (pnpm via the exact rule, tail via the safe list). The compound-decomposition story is intact — D6 (`pnpm typecheck \| env`) is **Denied** because `env` is genuinely not safe-listed; see new E-series rows below. |
 | D2 | `Bash(pnpm typecheck)` (exact) | `pnpm typecheck --watch` | Denied | Denied (2026-05-22) — confirms multi-word exact is genuinely exact (no implicit `:*`); same shape as Cr2 for single-word exact. |
@@ -284,25 +291,38 @@ calls).
 
 ### Group D — command separators (assumptions #3, #4)
 
-| ID | Allow | Command | Expected | Empirical |
+Target: `Bash(rmdir:*)` on both halves (when both should pass), plus
+`env` (not safe-listed per Baseline) as the discriminating
+non-matching stage. Probes use nonexistent directory names so rmdir
+errors safely. The deny-rule probe (D2) keeps `cd:*` as the right
+half because `Bash(cd:*)` is in the standard template's deny block.
+
+| ID | Allow / Deny | Command | Expected | Empirical |
 |---|---|---|---|---|
-| D1 | `Bash(echo:*)` | `echo a && echo b` | Allowed | Allowed (2026-05-20) |
-| D2 | `Bash(echo:*)`, deny `Bash(cd:*)` | `echo a && cd .` | Denied (deny) | Denied (2026-05-20) |
-| D3 | `Bash(echo:*)` only | `echo a && whoami` | Denied (allow rule missing) | **Allowed** (2026-05-20) — `whoami` is on the built-in safe list (Allowed on its own). Follow-up probe `echo a && env` is **Denied** (env is denied on its own), confirming `&&` does decompose for allow checks; the divergence is the safe list, not the decomposition. |
-| D4 | `Bash(echo:*)` | `echo a ; echo b` | Allowed | Allowed (2026-05-20) |
-| D5 | `Bash(echo:*)` | `echo a \|\| echo b` | Allowed | Allowed (2026-05-20) — second half was skipped by shell short-circuit but the matcher allowed the call |
-| D6 | `Bash(echo:*)` | `echo a &` (background) | Allowed | Allowed (2026-05-20) |
+| D1 | `Bash(rmdir:*)` | `rmdir probe-d1-1-dne && rmdir probe-d1-2-dne` | Allowed (both halves match) | |
+| D2 | `Bash(rmdir:*)`, deny `Bash(cd:*)` | `rmdir probe-d2-dne && cd .` | Denied (deny rule on right half) | |
+| D3 | `Bash(rmdir:*)` only (no `Bash(env)`) | `rmdir probe-d3-dne && env` | Denied (env half fails allow check) | |
+| D4 | `Bash(rmdir:*)` | `rmdir probe-d4-1-dne ; rmdir probe-d4-2-dne` (semicolon) | Allowed | |
+| D5 | `Bash(rmdir:*)` | `rmdir probe-d5-1-dne \|\| rmdir probe-d5-2-dne` (or-else) | Allowed | |
+| D6 | `Bash(rmdir:*)` | `rmdir probe-d6-dne &` (background) | Allowed | |
 
 ### Group E — pipes, redirects, subshells (assumption #3)
 
+Target: `Bash(rmdir:*)`, with `env` as the discriminating non-matching
+pipeline stage. Subshell probes test whether `$(...)` / backtick
+wrappers count as distinct shapes — load-bearing for the "worker
+can't bypass via subshell" property. E3's redirect target is `/etc/`,
+which is outside cwd (probing §2 on the redirect target) and also
+unwritable as a safety net.
+
 | ID | Allow | Command | Expected | Empirical |
 |---|---|---|---|---|
-| E1 | `Bash(echo:*)`, `Bash(tail:*)` | `echo hello \| tail -1` | Allowed | Allowed (2026-05-20) |
-| E2 | `Bash(echo:*)` only (no `tail`) | `echo hello \| tail -1` | Denied (allow rule missing) | **Allowed** (2026-05-22) — but not by pipe-bypass: `tail` is on the Bash safe list (see Baseline), so every pipeline stage independently passes. Follow-up R19 (`echo hello \| env`) is Denied because `env` is neither allowed nor safe-listed, confirming pipes decompose like `&&` — every stage must clear matcher + §2. |
-| E3 | `Bash(echo:*)` | `echo hello > /tmp/x` | Allowed | **Denied** (2026-05-20) — `/tmp/x` is outside the worktree; same path-aware gate as B3 |
-| E4 | `Bash(echo:*)` | `echo hello 2>&1 \| tail -1` (no `tail` in allow) | Denied | **Allowed** (2026-05-22) — same as E2: `tail` is safe-listed. Stderr redirect is transparent to the matcher. |
-| E5 | `Bash(echo:*)` | `echo $(whoami)` (command substitution, `whoami` unallowlisted) | Denied | Denied (2026-05-20) — note: even though `whoami` is on the built-in safe list (D3), wrapping it in `$(...)` still denies the outer call. Command substitution surfaces the inner command to the matcher and the wrapped form is rejected as a distinct shape. |
-| E6 | `Bash(echo:*)` | `` echo `whoami` `` (backtick substitution) | Denied | Denied (2026-05-20) — same |
+| E1 | `Bash(rmdir:*)`, `Bash(env)` | `rmdir probe-e1-dne \| env` | Allowed (both stages clear) | |
+| E2 | `Bash(rmdir:*)` only (no `Bash(env)`) | `rmdir probe-e2-dne \| env` | Denied (env stage fails allow check) | |
+| E3 | `Bash(rmdir:*)` | `rmdir probe-e3-dne > /etc/probe-e3-out` | Denied by §2 on the redirect target | |
+| E4 | `Bash(rmdir:*)` only (no `Bash(env)`) | `rmdir probe-e4-dne 2>&1 \| env` | Denied (stderr redirect doesn't disguise the env stage) | |
+| E5 | `Bash(rmdir:*)` | `rmdir $(echo probe-e5)` (subshell substitution) | Denied (subshell shape rejected) | |
+| E6 | `Bash(rmdir:*)` | `` rmdir `echo probe-e6` `` (backtick substitution) | Denied (backtick shape rejected) | |
 | E7 | `Bash(pnpm typecheck)` (exact) | `pnpm typecheck 2>&1 \| tail -30` | Denied | Expected revised — `tail` is safe-listed (Session A R5/R6). **Allowed** (2026-05-22, D8) — both stages clear; the catalog originally expected Denied under the false premise that `tail` needed a rule. |
 | D6 | `Bash(pnpm typecheck)` + `Bash(rmdir:*)`; NO `Bash(echo:*)` | `pnpm typecheck \| env` | Denied | Denied (allow rule missing) (2026-05-22) — `env` is not safe-listed (Session A); compound decomposes per assumption #3, and the env stage fails to clear. The discriminating test for "does the compound rule bypass per-stage gating when the leader is multi-word?" — confirms it does not. |
 | D7 | same | `pnpm typecheck 2>&1 \| env` | Denied | Denied (2026-05-22) — stderr redirect doesn't disguise the compound from the matcher. |
@@ -310,25 +330,32 @@ calls).
 | D10 | same | `pnpm typecheck && rmdir nonexistent-d10` | Allowed | Allowed (2026-05-22) — both halves clear (pnpm via the exact rule, rmdir via `Bash(rmdir:*)`); runtime short-circuits on pnpm's missing-package.json error so rmdir doesn't actually run, but matcher passed both. |
 | D-bonus | same | `pnpm typecheck \| cat /tmp/x` | Denied | Denied (2026-05-22) — §2 fires on the downstream `cat /tmp/x` (outside-cwd path arg to a §2-listed command) even though the leading stage clears via the multi-word rule. Confirms §2 fires per pipeline stage independently of where the allowed stage lives — matches Session A R23 with a multi-word leader. |
 
-E2 and E1 together disambiguate two hypotheses for pipes: if E2 is
-Allowed, pipes are intra-command (the whole pipeline is one command,
-prefix-matched). If E2 is Denied, pipes decompose like `&&` (both
-halves checked individually).
+E2 is the discriminating probe. If pipes were intra-command (the
+whole pipeline treated as one command, prefix-matched), E2 would be
+Allowed under `Bash(rmdir:*)` alone. Denied confirms pipes decompose
+like `&&` — every stage must independently clear allow + safe list +
+§2.
 
-E5/E6 are the worst potential hole. If a subshell counts as
-intra-command, `echo $(rm /tmp/probe)` matches `Bash(echo:*)` and runs
-`rm` inside the subshell — same shape as a pipe bypass but with
-arbitrary code in the subshell. **Probe before relying on the matcher
-to block this.**
+E5/E6 are the load-bearing subshell tests. If a subshell counted as
+intra-command, `rmdir $(rm /tmp/probe)` would match `Bash(rmdir:*)`
+and run `rm` inside the subshell — arbitrary code masquerading as an
+allowed outer call. The expected Denied confirms subshell shapes are
+rejected as distinct (cross-cutting finding §5).
 
-### Group F — quoting, glob, env (assumption #10)
+### Group F — quoting, glob, env-var (assumption #10)
+
+Target: `Bash(rmdir:*)`. Probes test whether quote / glob / `$VAR`
+shapes in arg tokens change which allow rule matches. F3 uses `$PWD`
+(expands inside cwd) rather than `$HOME` (expands outside cwd) so the
+Denied outcome attributes to the `$VAR` shape rejection alone, not
+co-attributable to §2 firing on an outside-cwd expansion.
 
 | ID | Allow | Command | Expected | Empirical |
 |---|---|---|---|---|
-| F1 | `Bash(echo:*)` | `echo "hello world"` | Allowed | Allowed (2026-05-20) |
-| F2 | `Bash(echo:*)` | `echo *` (glob) | Allowed | Allowed (2026-05-20) |
-| F3 | `Bash(echo:*)` | `echo $HOME` | Allowed | **Denied** (2026-05-20) — unexpanded `$VAR` triggers the same shape-rejection as outside-worktree paths; the matcher treats it as potentially resolving to a sensitive value |
-| F4 | `Bash(echo:*)` | `echo \$HOME` (escaped) | Allowed | Allowed (2026-05-20) — escaping the `$` removes the variable reference, so the gate doesn't fire |
+| F1 | `Bash(rmdir:*)` | `rmdir "probe f1 dne"` (quoted positional with space) | Allowed | |
+| F2 | `Bash(rmdir:*)` | `rmdir probe-f2-dne-*` (glob with no matches; literal `*` passed) | Allowed | |
+| F3 | `Bash(rmdir:*)` | `rmdir $PWD/probe-f3-dne` (`$VAR` expansion to inside cwd) | Denied (`$VAR` shape rejected) | |
+| F4 | `Bash(rmdir:*)` | `rmdir \$PWD-probe-f4-dne` (escaped `$`) | Allowed | |
 
 ### Group T — top-level tool gating (assumption #7)
 
@@ -366,12 +393,13 @@ disambiguate it from Group B's argument-path gate.
 | N5 | `Bash(echo:*)` (irrelevant) | `/home/ubuntu/data/local/orchestrate-ralph/CONTEXT.md` (absolute path INSIDE worktree, non-executable file) | Denied if the gate is "first token contains `/`"; Allowed if it's the path-locality gate | Denied (2026-05-20) — proves the gate is on the first token's shape, not on whether the path is inside cwd |
 | N6 | `Bash(echo:*)` (irrelevant) | `./CONTEXT.md` (relative, leading `./`) | Denied if the gate is "first token contains `/`" | Denied (2026-05-20) — `./X` is rejected the same way |
 
-N5 is the disambiguation probe. Group B's `ls /tmp` (Denied) and
-`ls /home/.../orchestrate-ralph` (Allowed) show the path-locality gate
-*on argument tokens* draws a line at the worktree boundary. N5 puts an
-absolute path **inside** the worktree as the *first* token and it's
-still Denied — so the first-token gate doesn't care about the worktree
-boundary, only that the token contains `/`.
+N5 is the disambiguation probe. The §2 path-locality gate on argument
+tokens (Group B's `rmdir /etc`, plus the broader command list in
+Baseline) draws a line at the worktree boundary — outside-cwd args
+deny, inside-cwd args allow. N5 puts an absolute path **inside** the
+worktree as the *first* token and it's still Denied, so the first-token
+gate doesn't care about the worktree boundary; only that the token
+contains `/`.
 
 ### Group H — path-guard hook (assumption #9)
 
