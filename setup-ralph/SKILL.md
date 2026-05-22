@@ -54,12 +54,15 @@ Walk the user through these one at a time — present, get an answer, move on:
 - **Gate** — show the autodetected command list; let the user correct it.
   Order matters: a change must pass each command in turn.
 - **Env bootstrap** — confirm the step in one line, or record "None".
-- **Parallelism** — `parallel-safe` is true only if the tracker exposes a
-  dependency relation the orchestrator can read (an issue's `Blocked by`, or
-  the equivalent). Confirm from the tracker type; when unsure, default false —
-  the orchestrator then runs serially, which is always correct.
+- **Parallelism** — `parallel-safe` is a *capability declaration*: it is
+  true only if the tracker exposes a dependency relation the orchestrator
+  can read (an issue's `Blocked by`, or the equivalent). Confirm from the
+  tracker type; when unsure, default false. The canonical
+  `/orchestrate-ralph` skill ignores the flag entirely (single-worker mode
+  is always correct); the opt-in `/orchestrate-ralph-parallel` skill
+  requires it true and halts otherwise.
 - **Worker permission mode** — how a worker handles an unallowlisted command.
-  Default **`dontAsk`** (recommended for AFK / parallel-wave runs): the
+  Default **`dontAsk`** (recommended for AFK runs): the
   command auto-denies as a tool error the worker can branch on — a missing
   allowlist entry becomes a clean failure the loop handles instead of a
   stalled prompt. The alternative **`default`** prompts your interactive
