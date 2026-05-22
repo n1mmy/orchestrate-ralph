@@ -7,18 +7,15 @@ architecture: an unenforced orchestrator + enforced workers means doctrine
 alone restrains the orchestrator, which has failed repeatedly; an enforced
 orchestrator (ADR 0004) means the permission matcher does.
 
-These tests have been *load-bearing* — running them in a previous session
-falsified the orchestrator-as-subagent plan (see "Rejected variants"
-below). Re-run them when:
+These tests are load-bearing: they falsified the
+orchestrator-as-subagent plan (see "Rejected variants" below) and
+confirmed the enforced-parent worker propagation story. Re-run them
+when:
 
-- A Claude Code version bump changes harness behaviour and you want to
-  catch propagation regressions.
-- A new architecture variant ("what if the orchestrator runs as X") is
-  being weighed and you need empirical evidence before committing.
-
-ADR 0004's previously-open item ("worker hook propagation under
-enforced parents has not been re-verified end-to-end") is closed as
-of 2026-05-22 — see "Resolved 2026-05-22" further down.
+- A Claude Code version bump changes harness behaviour and you want
+  to catch propagation regressions.
+- A new architecture variant ("what if the orchestrator runs as X")
+  is being weighed and you need empirical evidence before committing.
 
 ## Baseline — settings load and subagent enforcement
 
@@ -215,6 +212,37 @@ Expected:
   inventory) regardless of the orchestrator's needs. P5 reports the
   worker's own auto-isolation cwd, not the parent's.
 
+#### Recorded observation — worker sub-step (2026-05-22)
+
+Parent launched in `.claude/worktrees/probe-pending` with a probe
+`settings.local.json` placed pre-startup and the unmutated
+path-guard hook at `.ralph/hook-path-guard.py`. Parent enforcement
+confirmed (`cd .` clean deny, no prompt). Parent then dispatched one
+`Agent` with `subagent_type: "claude"` and `isolation: "worktree"`.
+Probe targets reflect the then-current P1 (`Bash git remote -v`);
+re-runs should use the current canonical `cd .`.
+
+| Probe | Outcome | Evidence |
+|---|---|---|
+| P1 — `Bash git remote -v` | denied (deny rule) | `Permission to use Bash with command git remote -v has been denied.` |
+| P2 — `Write /tmp/probe-f-p2-subagent.txt` | **denied (path-guard hook)** | `Path-guard: Write targets /tmp/probe-f-p2-subagent.txt, outside this worktree (/home/ubuntu/data/local/orchestrate-ralph/.claude/worktrees/agent-a8dd41018259bde66). A Ralph worker writes only inside its own worktree …` |
+| P3 — `Bash env` | denied (allow rule missing) | `Permission to use Bash has been denied because Claude Code is running in don't ask mode.` |
+| P4 — Agent dispatch from inside worker | not spawned; Agent absent from inventory | `ToolSearch select:Agent,Task` returned no matches |
+| P5 — `pwd` | `/home/ubuntu/data/local/orchestrate-ralph/.claude/worktrees/agent-a8dd41018259bde66` | matches the auto-isolation worktree path scheme |
+
+All three distinct deny shapes from
+[Baseline](#deny-shapes--message-form-distinctions) were observed
+cleanly; no prompts fired at any layer. The load-bearing single
+fact is **P2's `Path-guard:` prefix**, which is unforgeable by any
+other gate; the hook fired in the worker subagent with the worker's
+own auto-isolation worktree as the boundary (not the parent's),
+which is the correct behaviour — the hook reads `realpath(cwd)` at
+the hook event's cwd.
+
+P4 matches the V1–V4 inventory finding: no subagent in any
+configuration has the `Agent` tool, regardless of parent enforcement
+state.
+
 ### 2. Original (unenforced) architecture — user session pre-placement
 
 The pre-ADR-0004 state. Useful as a regression check: if a future
@@ -242,10 +270,9 @@ Expected:
 
 ### Rejected variants — orchestrator-as-subagent
 
-All four variants were tested in session bridge-cse_01LUQ7… and produced
-uniform failure. They are documented here so a future "what if we put the
-orchestrator in a subagent?" suggestion can be rejected with citations
-instead of re-derivation.
+All four variants produced uniform failure. They are documented here
+so a future "what if we put the orchestrator in a subagent?"
+suggestion can be rejected with citations instead of re-derivation.
 
 The setup is the same for all four: `.claude/settings.local.json` placed
 mid-session, then the user session dispatches a single `Agent` call
@@ -328,43 +355,13 @@ interactive approval rather than under the configuration you're trying
 to test. Approve only the *outer* Agent dispatches (the act of spawning
 the probe subagent itself).
 
-## Resolved 2026-05-22 — worker hook propagation under enforced parent
-
-**Status:** confirmed end-to-end.
-
-Session F of the probe-pending runbook ran Scenario 1's worker sub-step
-in full. The parent session was launched in
-`.claude/worktrees/probe-pending` with `probes/configs/F.json` placed
-at `.claude/settings.local.json` and the unmutated path-guard hook at
-`.ralph/hook-path-guard.py`. Parent enforcement confirmed (`cd .` clean
-deny, no prompt). The parent then dispatched one `Agent` with
-`subagent_type: "claude"` and `isolation: "worktree"`. Inside the worker:
-
-| Probe | Outcome | Evidence |
-|---|---|---|
-| P1 — `Bash git remote -v` | denied-by-permissions | `Permission to use Bash with command git remote -v has been denied.` |
-| P2 — `Write /tmp/probe-f-p2-subagent.txt` | **denied-by-hook (Path-guard branded)** | `Path-guard: Write targets /tmp/probe-f-p2-subagent.txt, outside this worktree (/home/ubuntu/data/local/orchestrate-ralph/.claude/worktrees/agent-a8dd41018259bde66). A Ralph worker writes only inside its own worktree …` |
-| P3 — `Bash env` | denied-by-permissions | `Permission to use Bash has been denied because Claude Code is running in don't ask mode.` |
-| P4 — Agent dispatch from inside worker | not spawned; Agent absent from inventory | `ToolSearch select:Agent,Task` returned no matches |
-| P5 — `pwd` | `/home/ubuntu/data/local/orchestrate-ralph/.claude/worktrees/agent-a8dd41018259bde66` | matches the auto-isolation worktree path scheme |
-
-All three deny shapes the methodology distinguishes were observed
-cleanly (denied-by-permissions, denied-by-hook, neither
-prompted-then-denied). No prompts fired at any layer. The
-load-bearing single fact: **P2's error string contains the
-`Path-guard:` prefix**, which is unforgeable by any other gate. The
-hook fired in the worker subagent with the worker's own
-auto-isolation worktree as the boundary (not the parent's worktree),
-which is the correct behavior — the hook reads `realpath(cwd)` at the
-hook event's cwd.
-
-P4 matches the V1–V4 rejected-variants finding: no subagent in any
-configuration has the `Agent` tool. Orchestrator-as-subagent remains
-structurally impossible.
-
-ADR 0004's open item is closed. The orchestrate-ralph propagation
-story is empirically verified end-to-end.
+## Updating this doc
 
 When you re-run any of these scenarios and find a result that differs
-from what's recorded here, update this doc with the new finding, the
-date, and the Claude Code version observed.
+from what's recorded, update both the recorded-observation row in the
+relevant Scenario AND the Baseline claim it grounds — date the new
+empirical cell, record the Claude Code version observed, and
+patch any doctrine in the skill package that relied on the old
+behaviour in the same change set. Baseline is descriptive
+([ADR 0005](adr/0005-descriptive-doctrine-after-the-matcher-catalog.md));
+falsified hedges become updated hedges, not just demoted ones.
