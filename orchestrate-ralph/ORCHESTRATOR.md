@@ -107,10 +107,13 @@ You *do*, directly, the integration-side actions of each round — because the
 harness isolates every sub-agent and so none of these can be delegated:
 
 - **Merge** the worker's branch into the integration branch with `git merge
-  --no-ff` (step 6). The worker reset to the integration tip before working,
-  so the merge is a fast-forward by construction; if the merge *does*
-  conflict, treat it as a worker-doctrine bug and surface it (step 8's
-  red-gate row also covers this case via the same rollback).
+  --ff-only` (step 6). The worker reset to the integration tip before
+  working, so its branch is a strict descendant of integration; the merge
+  advances the integration ref onto the worker's tip with no merge commit
+  and no possibility of conflict. If `--ff-only` refuses (non-fast-forward),
+  treat it as a worker-doctrine bug and surface it — step 8's red-gate row
+  covers this via the same `git reset --hard <pre-round-tip>` rollback,
+  which is a no-op because `--ff-only` aborts without mutating state.
 - **Gate the post-merge tip** once per round (step 7). You read only
   pass/fail; on red you reset and leave the issue at `ready-for-agent`
   rather than fixing it yourself.
@@ -169,9 +172,9 @@ signal you'd otherwise get on the first failure.
    becomes the **integration branch**: the worker branches off it, its work
    merges back into it, and when the run ends you hand that branch to the user.
    - It must **not** be the repo's default branch (`main` / `master`) — the
-     loop accumulates `--no-ff` merge commits, and those must never land
-     straight on the trunk. Check against `git symbolic-ref
-     refs/remotes/origin/HEAD` (or the known default).
+     loop fast-forwards the branch with worker commits and resets it hard
+     on red gates, neither of which belongs on the trunk. Check against
+     `git symbolic-ref refs/remotes/origin/HEAD` (or the known default).
    - The working tree must be **clean** (`git status --porcelain` empty) — a
      red gate triggers `git reset --hard`, which would destroy any
      uncommitted work.
@@ -363,9 +366,9 @@ Reclassify two cases before moving on:
 ### 6 — Merge the worker's branch if it reported `done`
 
 Use the merge procedure below. The worker reset to the integration tip before
-starting, so its branch is a fast-forward of integration by construction; the
-`--no-ff` merge is a one-commit operation with no conflict possible from
-divergent histories.
+starting, so its branch is a strict descendant of integration; the `--ff-only`
+merge advances the integration ref with no merge commit and no conflict
+possible from divergent histories.
 
 - **Clean merge** → the worker's `done` outcome stands.
 - **Aborts citing *untracked working tree files would be overwritten*** —
@@ -457,9 +460,10 @@ never per issue (too noisy).
 
 After the summary is out, reap the worker's branch: `git branch -D
 <worker-branch>` as one bare `Bash` call. On the `done`-green path the
-worker's commit is reachable through the integration merge commit; on every
-other path the commit (if any) lives in the reflog for 90 days, so nothing
-is lost. The day-to-day `git branch` listing stays clean.
+worker's commits are part of the integration branch's linear history (the
+step-6 fast-forward moved integration onto them); on every other path the
+commit (if any) lives in the reflog for 90 days, so nothing is lost. The
+day-to-day `git branch` listing stays clean.
 
 ## Stop conditions
 
@@ -556,16 +560,23 @@ you carry the doctrine to it).
 
 In the integration worktree, on the integration branch:
 
-- `git merge --no-ff <worker-branch>` — merge the worker's branch.
+- `git merge --ff-only <worker-branch>` — fast-forward integration onto the
+  worker's tip.
 - Clean → integrated; continue.
 - Aborts citing *untracked working tree files would be overwritten* →
   untracked-escape litter is in the way. `git clean -f -- <exactly the paths
   git named>` — only `-f`, only those pathspecs, never `-d` / `-x` / a bare
   `git clean` — then re-run the merge once. The named files are about to be
   written by the merge anyway, so removing them loses nothing.
+- Refuses *Not possible to fast-forward* → the worker's branch is not a
+  strict descendant of integration. This is a worker-doctrine bug (the
+  worker did not reset to the integration tip before working). Do **not**
+  drop `--ff-only` to recover; surface it via step 8's red-gate row, which
+  resets to the pre-round tip (a no-op since `--ff-only` aborted without
+  mutating state) and leaves the issue at `ready-for-agent`.
 
-A clean `--no-ff` merge produces only a one-line commit summary — bounded
-output, safe for the orchestrator's context.
+A clean `--ff-only` merge produces "Updating <sha>..<sha>" plus a fast-forward
+summary — bounded output, safe for the orchestrator's context.
 
 ### Gate procedure — the orchestrator runs this directly
 
