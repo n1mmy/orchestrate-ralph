@@ -113,10 +113,13 @@ commands like `whoami`, `pwd`, `date` run without an allow rule.
 
 **Stay in your worktree.** The path-guard hook denies `Write` / `Edit` /
 `NotebookEdit` targeting a path outside `realpath(<worktree-root>)`; the
-matcher's arg-locality gate denies absolute paths outside the worktree in
-Bash arguments (`cat /etc/passwd`, `find /`). Two shapes neither layer
-covers — the orchestrator's escape checks backstop them, but a
-violation is still your fault and shows up on the issue:
+matcher's arg-locality gate denies absolute paths outside the worktree
+in arguments to content-reading shapes like `cat /etc/passwd`, `find /`
+— but the gate is command-specific, not universal: `git` subcommands
+and a handful of others slip past. Don't rely on the gate to catch
+every outside-cwd path. Two shapes neither layer covers — the
+orchestrator's escape checks backstop them, but a violation is still
+your fault and shows up on the issue:
 
 - **Bash subprocesses that write to paths *you* constructed.** A build
   tool's output dir, codegen, a test runner's cache — the matcher checks

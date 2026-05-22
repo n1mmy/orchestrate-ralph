@@ -55,8 +55,10 @@ revisit.
   most escape shapes — the path-guard hook in `.ralph/settings.json` (a
   `PreToolUse` hook on `Write` / `Edit` / `NotebookEdit`) hard-denies edits
   to a path outside `realpath(<worktree>)`, and the matcher's arg-locality
-  gate denies any absolute path outside the worktree appearing in a `Bash`
-  argument. Two residual vectors are *not* statically covered, and that is
+  gate denies absolute paths outside the worktree appearing in `Bash`
+  arguments to a hard-coded list of path-typed commands (`cat`, `head`,
+  `tail`, `wc`, `grep`, `find`, `stat`, `ls` — `git` and most others
+  slip past). Two residual vectors are *not* statically covered, and that is
   why step-5 detection still exists:
   - **Bash subprocesses with constructed paths.** A build tool, codegen, or
     test runner the worker invokes can write wherever the worker tells it
