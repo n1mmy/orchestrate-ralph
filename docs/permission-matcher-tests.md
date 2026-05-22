@@ -497,34 +497,42 @@ list; the discriminating probes are the Denied ones.
 - §2 path-locality is **command-specific**, not content-aware (Bm14). Git escapes the gate even with an outside-cwd absolute path.
 - Multi-word allow rules are **position-locked at argv positions 0/1** (Bm16). A leading flag like `git -c <X> status` does not match `Bash(git status:*)`.
 
-### Group Bg — built-in git safe list (Session Bf)
+### Group Bg — git safe list enumeration
 
-Session Bf followup to Bm8. Same config as Session A (allow =
-`Bash(echo:*)` only). Probes which git subcommands run with no
-git-related allow rule present — i.e., which are on a built-in safe
-list analogous to the Bash command safe list (see Baseline).
-
-Rather than a full per-probe table (45 probes), the table below
-summarises by outcome class.
+Procedure for enumerating the git subcommand safe list whose
+membership is documented in
+[Baseline](#git-subcommand-safe-list-current-understanding). Run with
+no `Bash(git:*)` rule and probe each `git <subcommand>` shape; classify
+by outcome. The table records probes by class so a future re-run can
+detect drift in either direction (a subcommand newly safe-listed, or
+one removed). When drift is observed, patch Baseline and any doctrine
+that relied on the old membership in the same change.
 
 | Class | Subcommands (probe IDs) | Outcome |
 |---|---|---|
 | Read-shape, safe-listed | `log`, `log --oneline …`, `log --grep …`, `diff`, `diff HEAD`, `show`, `show HEAD`, `blame <path>`, `reflog`, `describe`, `rev-parse`, `rev-parse --show-toplevel`, `ls-files`, `status`, `for-each-ref`, `stash list`, `worktree list`, `cat-file -p <ref>` (Bf1–Bf16, Bf17, Bf21, Bf23, Bf24, Bf25) | **Allowed** (2026-05-22) |
 | Read-shape, dual-mode (bare/option-only allowed; positional name denied) | `branch` Allowed; `branch --list` Allowed; `branch <name>` Denied. `tag` Allowed; `tag <name>` Denied. (Bf8–Bf10 Allowed vs Bf31, Bf32 Denied.) | mixed — safe list discriminates the read form from the create form by argument shape |
-| Read-shape, NOT safe-listed | `config --list`, `config <key>`, `symbolic-ref HEAD`, `hash-object <path>` (Bf18, Bf19, Bf20, Bf22) | **Denied (allow rule missing)** (2026-05-22) — surprise denies; pure reads but not on the safe list. Workers reading config must add `Bash(git config:*)` to allow. |
-| Write-shape, expected denied | `add`, `commit -m`, `rm --dry-run`, `reset`, `stash push`, `checkout`, `restore` (Bf26–Bf30, Bf33, Bf34) | Denied (allow rule missing) (2026-05-22) — matcher decides before `--dry-run` is parsed; second-word semantics |
-| Outside-cwd path arg | `log /tmp`, `diff /etc/passwd`, `blame /etc/issue`, `ls-files /tmp`, `log -- /tmp`, `show :/etc/passwd` (Bf35–Bf40) | **Allowed at the matcher** (2026-05-22) — git rejects internally; §2 does not fire. Matches Bm14 finding. |
-| Deny-block, expected denied | `push --help`, `fetch --dry-run`, `pull --rebase`, `remote -v`, `ls-remote` (Bf41–Bf45) | Denied (deny rule) (2026-05-22) — distinct deny-rule message form ("with command \<X\> has been denied") |
-| First-token shape control | `/usr/bin/git log` (Bonus) | Denied (allow rule missing) (2026-05-22) — first-token-shape gate (§3) intact; safe list applies only to bare `git` |
+| Read-shape, NOT safe-listed | `config --list`, `config <key>`, `symbolic-ref HEAD`, `hash-object <path>` (Bf18, Bf19, Bf20, Bf22) | **Denied (allow rule missing)** (2026-05-22) |
+| Write-shape | `add`, `commit -m`, `rm --dry-run`, `reset`, `stash push`, `checkout`, `restore` (Bf26–Bf30, Bf33, Bf34) | Denied (allow rule missing) (2026-05-22) — matcher decides before `--dry-run` is parsed |
+| Outside-cwd path arg | `log /tmp`, `diff /etc/passwd`, `blame /etc/issue`, `ls-files /tmp`, `log -- /tmp`, `show :/etc/passwd` (Bf35–Bf40) | **Allowed at the matcher** (2026-05-22) — git rejects internally; §2 does not fire (matches Bm14) |
+| Deny-block | `push --help`, `fetch --dry-run`, `pull --rebase`, `remote -v`, `ls-remote` (Bf41–Bf45) | Denied (deny rule) (2026-05-22) — distinct deny-rule message form ("with command \<X\> has been denied") |
+| First-token shape control | `/usr/bin/git log` (Bonus) | Denied (allow rule missing) (2026-05-22) — first-token-shape gate (Findings §3) intact; safe list applies only to bare `git` |
 
-**Conclusions (Group Bg):**
+**Group-specific findings** (the membership itself plus the
+§2-bypass observation and the `cat-file -p` exposure live in
+[Baseline](#git-subcommand-safe-list-current-understanding); the
+two below are the second-order insights about *how* the safe list
+is constructed):
 
-- A **built-in git safe list** exists, parallel to the Bash command safe list. It covers most porcelain reads plus a few plumbing reads (notably `cat-file`, `for-each-ref`, `rev-parse`, `ls-files`) but not all (`symbolic-ref`, `hash-object`, all `config` forms are excluded).
-- **`git cat-file -p <ref>`** is the most security-relevant entry — it dumps the contents of any object reachable from a ref, with no allow rule required. A worker can read every committed file by ref-walking. The path-guard hook covers `Write`/`Edit`/`NotebookEdit` but not subprocess reads, so this is not a hook-mitigable surface. Worth flagging in worker doctrine if any guarantee is being made about "worker can't see <X>" — the right answer is "ref-reachable contents are visible to any worker".
-- The dual-mode subcommands (`git branch`, `git tag`) suggest the safe list is constructed by *(subcommand, arg-shape)* tuples rather than a flat set of subcommand names. The matcher knows `git branch` with no positional name is a read; `git branch <name>` is a create.
-- `--dry-run` does NOT exempt write-shape subcommands. The matcher decides before flag parsing. Workers cannot use `--dry-run` to probe what a write would do under a restrictive config.
-- §2 path-locality is **not git-aware**. Outside-cwd paths pass the matcher for any safe-listed git subcommand; git's own "outside repository" check catches the obvious cases, but that's git's check, not the matcher's. A subcommand that didn't enforce outside-repo (or that read absolute paths transparently) would have access.
-- The first-token shape gate (Findings §3) remains intact: the safe list applies only to bare `git`. `/usr/bin/git log` denies — confirms the gate is independent of which command's safe list would apply.
+- The dual-mode subcommands (`git branch`, `git tag`) imply the safe
+  list is keyed by *(subcommand, arg-shape)* tuples rather than a
+  flat set of subcommand names. `git branch` with no positional name
+  is a read; `git branch <name>` is a create, and the matcher
+  distinguishes them.
+- `--dry-run` does not exempt write-shape subcommands. The matcher
+  decides before flag parsing, so workers cannot use `--dry-run` to
+  probe what a write would do under a restrictive config — this
+  applies to all matcher attribution, not just git.
 
 ## Cross-cutting findings
 
