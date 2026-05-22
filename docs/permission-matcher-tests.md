@@ -74,6 +74,118 @@ the supposedly-denying allow rule *added*: if the outcome is Allowed,
 the original deny was "allow rule missing"; if it's still Denied,
 the original was "deny rule."
 
+## Baseline — built-in safe lists
+
+We believe the matcher runs **at least two** built-in safe lists in
+parallel with the allow-rule machinery: one over Bash command names,
+one over `git` subcommands. There may be more. A target on either
+list appears to return Allowed with no relevant allow rule placed —
+i.e. the rule isn't doing the work; the safe list is.
+
+These lists are not documented and their contents may drift across
+Claude Code versions. A probe whose target is on a safe list is
+silently broken: its Allowed outcome tells you nothing about the
+allow rule under test. So before running any catalog group whose
+load-bearing outcome is Allowed, confirm safe-list membership for
+the target you intend to use.
+
+### Prove the safe lists before running other tests
+
+A short prerequisite probe, run end-to-end before the first catalog
+group of a session:
+
+1. Place a minimal allow list (only `Bash(echo:*)`), launch a probe
+   session, confirm enforcement (`cd .` denies).
+2. Dispatch each candidate Bash command bare. Allowed under no
+   relevant rule ⇒ safe-listed; Denied ⇒ not.
+3. For the git list, repeat with no `Bash(git:*)` rule, using bare
+   `git <subcommand>` shapes.
+4. Reconcile against the lists below. Any drift in membership
+   invalidates downstream conclusions in this catalog and in
+   skill-package doctrine that names the same targets — patch both
+   in the same change.
+
+Discriminating "the rule matched" from "the safe list ran the
+command" requires this step. Any Allowed outcome obtained without
+first establishing safe-list independence for the target is
+ambiguous.
+
+### Bash command safe list (current understanding)
+
+Believed safe-listed (run with no allow rule):
+
+- **Identity / environment:** `whoami`, `pwd`, `id`, `uname`, `date`,
+  `date +%Y`, `hostname`, `groups`, `uptime`, `ps`, `ps aux`, `free`,
+  `df`, `du`.
+- **Path / metadata (no content read):** `test`, `realpath`,
+  `readlink`, `dirname`, `basename`.
+- **Content-reading (subject to §2 path-locality):** `cat`, `head`,
+  `tail`, `wc`, `grep` (`ugrep` on Linux v2.1.117+), `find` (`bfs`),
+  `stat`, `ls`. These run iff every positional path arg is inside
+  `realpath(cwd)`; §2 fires on outside-cwd args before the safe-list
+  check.
+- **Trivial output / arithmetic:** `echo`, `printf`, `true`, `false`,
+  `seq`, `expr`.
+- **Tool location:** `which`, `type`.
+
+Believed **not** safe-listed (denied without a rule):
+
+- **Environment leaks:** `env`, `printenv`.
+- **Mutating filesystem:** `mkdir`, `rm`, `rmdir`.
+- **Session metadata:** `tty`, `who`, `w`, `hostnamectl`,
+  `claude --version`, `command -v`, `hash`.
+- **Pipeline source:** `yes`.
+
+Aliases matter on Linux v2.1.117+: `grep` → `ugrep`, `find` → `bfs`.
+Flag semantics differ from GNU coreutils.
+
+### Git subcommand safe list (current understanding)
+
+Believed safe-listed (run with no `Bash(git:*)` rule):
+
+- `log`, `diff`, `show`, `blame`, `reflog`, `describe`, `rev-parse`,
+  `ls-files`, `status`, `cat-file`, `for-each-ref`, `stash list`,
+  `worktree list`.
+- `branch` and `tag` in bare or option-only shape (`branch <name>`
+  and `tag <name>` appear to be denied — the safe list seems to
+  discriminate read-shape from create-shape by argument shape).
+
+Believed NOT safe-listed (denied without a rule):
+
+- `config` (all forms), `symbolic-ref`, `hash-object`. Workers that
+  need config values must add `Bash(git config:*)` explicitly.
+
+Two implications worth carrying into downstream tests:
+
+- **§2 path-locality does NOT appear to fire** for safe-listed git
+  subcommands. `git status /tmp` and `git log /tmp` pass the
+  matcher; git's own "outside repository" check is the only thing
+  catching obvious cases.
+- **`git cat-file -p <ref>`** dumps the contents of any object
+  reachable from a ref with no allow rule required. The path-guard
+  hook does not cover subprocess reads, so this surface is not
+  hook-mitigable.
+
+### Negative-control targets
+
+When a probe's load-bearing outcome is "Allowed because the rule
+matched", pick a target neither safe list appears to touch:
+
+- **`yes`** — bare command source, denied without a rule. Canonical
+  unambiguous negative control for Bash safe-list independence.
+- **`env`** — denied without a rule; useful as the discriminating
+  stage in a pipe / `&&` compound probe.
+- **`rmdir`** — denied without a rule. Side-effect free in `--help`
+  and `missing operand` forms.
+- **`pnpm typecheck`** — denied without a rule; canonical multi-word
+  exact-match target. Underlying command errors out before any
+  side-effect when run outside a JS project.
+
+Conversely, when a probe's load-bearing outcome is "Denied because
+the rule didn't reach", a safe-listed target obscures the result:
+the call ran via the safe list, not via the rule under test. Pick
+from the "believed not safe-listed" lists above.
+
 ## Load-bearing assumptions
 
 Each row is a claim the package's doctrine, ADRs, or settings template
@@ -85,7 +197,7 @@ assumption; the doc is most useful once each row has a result.
 
 | # | Assumption | Where it lives | Test(s) | Status |
 |---|---|---|---|---|
-| 1 | `:*` after a command name allowlists "any suffix" | `setup-ralph/SKILL.md` step 3; common template entries like `Bash(git:*)` | A1–A5 | partial — A1–A5 confirmed for flag-only suffixes; B3 falsifies for absolute paths outside the worktree when the command is on the §2 path-typed list (`ls`, `cat`, `head`, `tail`, `wc`, `grep`, `find`, `stat`); 2026-05-22 Bm14 shows §2 does NOT fire for commands off that list (`git status /tmp` Allowed by matcher) — see Findings §2 update. |
+| 1 | `:*` after a command name allowlists "any suffix" | `setup-ralph/SKILL.md` step 3; common template entries like `Bash(git:*)` | A1–A5 (confounded); Bm Denied cases (discriminating) | partial — A1–A5 used `echo` which Baseline lists as safe-listed, so the Allowed outcomes are co-attributable to safe list OR rule and don't validate `:*` matching on their own. Discriminating evidence is on the rule's *negative* side: Bm9–Bm11 (word-boundary on both the first-token and trailing edges), Bm16 (multi-word rules position-locked at argv 0/1). Bounded by the path-locality gate: B3 falsifies "any suffix" for absolute paths outside the worktree when the command is on the §2 path-typed list (`ls`, `cat`, `head`, `tail`, `wc`, `grep`, `find`, `stat`); Bm14 shows §2 does NOT fire for commands off that list — see Findings §2. |
 | 2 | A bare command name with no `:*` is an exact match | `Bash(date +%s)` in the template uses this shape | C3, C4 superseded; Cr1–Cr9; D1–D5 for multi-word | **confirmed** (2026-05-22) — single-word: Cr1 Allowed (`rmdir` bare matches the exact rule); Cr2–Cr9 all Denied (any suffix — flag, positional, empty quoted arg, extra whitespace — fails the exact match). Multi-word: D1 Allowed (`pnpm typecheck` bare matches); D2/D3 Denied (`pnpm typecheck --watch`, `pnpm typecheck src` both rejected). The earlier "falsified" reading was a safe-list confound: `Bash(date +%s)` couldn't be isolated because `date` is safe-listed, and `Bash(echo)` couldn't either because `echo` is safe-listed too. Using non-safe-listed targets gives clean tests and the assumption holds for both single-word and multi-word exact-match rules. |
 | 3 | Compound shapes (`&&` / `||` / `;` / pipes / redirects / subshells) are distinct patterns from their parts and fail when not explicitly allowlisted | `ORCHESTRATOR.md` "Bash command shape"; `PROMPT.md` "Bash command shape"; the live-run-doctrine commits | D1–D6, E1–E7, R19–R23 | confirmed — every stage of a compound (whether `&&` / `;` / pipe) must independently clear allow-or-safe-list AND the §2 path-locality gate. R19 (`echo hello \| env` Denied), R21 (`env \| echo hi` Denied), R23 (`echo hello \| cat /etc/issue` Denied) lay this out for pipes; D1–D6 covered the other separators. E5/E6 confirm subshells don't bypass. D3's earlier "Allowed" anomaly was the safe-list, not pipe-decomposition. |
 | 4 | The matcher decomposes `&&`-chained compounds and checks each half against allow + deny | `ORCHESTRATOR.md` step 6 implicitly; permission-denied worker doctrine | D1, D2, D3 | confirmed — D2 catches a deny on the right half; follow-up probe `echo a && env` is denied because `env` is denied alone. D3 was Allowed only because the right half is on the built-in safe list. |
@@ -94,7 +206,7 @@ assumption; the doc is most useful once each row has a result.
 | 7 | Top-level tools (`Write`, `Read`, `Edit`, `Agent`, `Glob`, `Grep`) need explicit allow entries under `dontAsk`, else they auto-deny | settings template lists them; ADR 0004 names `Agent` as the load-bearing one | T1–T5 | **falsified for most tools — split into per-tool behaviour** (see Findings §4). Gated: `Write` (T2), `Edit` (T5). Auto-permitted under `dontAsk`: `Read` (T3), `Agent` (T1), `NotebookEdit` (T4). Unobservable on this host: `Glob`, `Grep` (the v2.1.117+ Linux build drops them entirely). Practical impact: the template's `Read`/`Agent`/`Glob`/`Grep` entries are dead weight under `dontAsk`; `Write`/`Edit` are load-bearing. |
 | 8 | `dontAsk` causes any unallowlisted call to auto-deny as a tool error (no prompt) | `ORCHESTRATOR.md`; setup-ralph "worker permission mode" prose; ADR 0004 | covered by every catalog test — the procedure's enforcement-confirmation step is the canonical case | confirmed — every `cd .`, `env`, `rm`, `mkdir`, `claude --version`, `ls /tmp`, `ls /` produced "Denied by permissions" with no prompt; refinements: "unallowlisted" excludes (a) the built-in Bash safe-command list and (b) the auto-permitted top-level tools `Read`/`Agent`/`NotebookEdit` (see Findings §4). |
 | 9 | The `PreToolUse` path-guard hook fires for `Write` / `Edit` / `NotebookEdit` whose target resolves outside `realpath(cwd)` | `setup-ralph/templates/hook-path-guard.py`; ADR 0002 | H1–H6 | confirmed for **`Write`** (H1–H4 plus H4-control-1/2/3 in Session E 2026-05-22). `Edit` not directly probed but the hook code is symmetric (same `GUARDED` set). **`NotebookEdit` unconfirmed** (H6) — the tool's read-before-write validator runs first and shadows any hook visibility; needs a two-step probe to settle. `EXTRA_ALLOWED_ROOTS` widening works precisely (H4 Allowed; H4-control-1's prefix-confusion attack stopped by the `+ os.sep` boundary). |
-| 10 | Glob expansion / quoting / env-var expansion in the command don't change which allow rule matches | implicit; no specific doctrine, but assumed by `Bash(echo:*)` matching `echo "hello world"` etc. | F1–F4 | falsified — F3 (`echo $HOME`) was Denied; the matcher rejects commands containing unexpanded `$VAR` references in the same shape that gets blocked for absolute external paths. Quoted strings (F1) and globs (F2) and escaped `\$` (F4) are unaffected. |
+| 10 | Glob expansion / quoting / env-var expansion in the command don't change which allow rule matches | implicit; no specific doctrine, but assumed by `Bash(echo:*)` matching `echo "hello world"` etc. | F1–F4 (F1/F2 confounded) | partially falsified — F1 (`echo "hello world"`) and F2 (`echo *`) used `echo` which Baseline lists as safe-listed, so their Allowed outcomes don't validate that quoting / glob are transparent to the matcher; only the negative side fires discriminatingly. F3 (`echo $HOME`) Denied: unexpanded `$VAR` triggers a distinct shape-rejection (same gate that blocks absolute external paths). F4 (`echo \$HOME`) Allowed: escaping the `$` removes the variable reference. Quoting / glob transparency to the matcher remains untested against a non-safe-listed target. |
 | 11 | A command invoked by full path (e.g. `/usr/bin/git`) is "a different, unrecognised shape" and fails to match the allow rule for the bare command name | `PROMPT.md:93–94`; `ORCHESTRATOR.md:110` ("never run a command by full path") | N1–N6 | confirmed — but the rationale is sharper than the doctrine states. N5 shows the gate fires even for an absolute path **inside** the worktree, so it isn't the argument-path gate (§2) re-firing on the first token. It is a separate name-shape lookup: any `/` in the first token (`/abs/path` or `./relative`) makes the lookup miss against both the allow list and the safe list. |
 | 12 | Multi-word `:*` prefixes in allow / deny rules (`Bash(git push:*)`, `Bash(git status:*)`) match exactly the multi-word prefix plus any suffix, and do not match unrelated subcommands | `setup-ralph/templates/settings.template.json` deny block (`Bash(git push:*)`, `Bash(git fetch:*)`, etc.); template-mode prose | M1, M2, M5 | confirmed — multi-word `:*` matches the prefix plus any suffix and does not over-match unrelated subcommands, on both sides. M1/M2 cover the **deny** side (`Bash(git push:*)` denied `git push --help`; did not over-match `git status`). M5 covers the **allow** side (`Bash(git status:*)` allowed `git status --short` with no `Bash(git:*)` present to confound). |
 | 13 | `Bash(<cmd>:*)` matches strictly the first-token command name, not arbitrary first-token text starting with `<cmd>` (i.e., the matcher tokenises on word boundary, so `Bash(rm:*)` does not match `rmdir`) | Implicit everywhere a short command is allowlisted via `:*` (`Bash(rm:*)` would be problematic if it over-matched `rmdir`); also a security-relevant property of every `Bash(<short>:*)` rule | M4 | confirmed via M4 — word-boundary tokenisation, not pure literal-prefix matching. With `Bash(rm:*)` as the only allow rule, `rmdir --help` was Denied. `Bash(<short>:*)` rules are scoped to the exact command name as intended. |
@@ -111,9 +223,13 @@ also update the relevant assumption row above and patch the doctrine
 where it relied on the old behaviour (see "Updating this doc" at the
 end).
 
-Probes use `echo` as the safe primitive where possible (no side
-effects). Where a destructive command is needed, use `cd .` (a genuine
-no-op under Claude Code, since cwd does not persist across `Bash`
+Probe targets must be picked deliberately. A probe whose load-bearing
+outcome is Allowed needs a target that the Baseline section lists as
+non-safe-listed, otherwise the safe list runs the command and the
+allow rule under test isn't exercised. The Negative-control targets
+subsection of Baseline lists canonical picks (`yes`, `env`, `rmdir`,
+`pnpm typecheck`). Where a destructive command is needed, `cd .` is a
+genuine no-op under Claude Code (cwd does not persist across `Bash`
 calls).
 
 ### Group A — `:*` prefix matching (assumption #1)
@@ -133,7 +249,7 @@ calls).
 | B1 | `Bash(ls:*)` | `ls` | Allowed | Allowed (2026-05-20) |
 | B2 | `Bash(ls:*)` | `ls -la` | Allowed | Allowed (2026-05-20) |
 | B3 | `Bash(ls:*)` | `ls /tmp` (positional arg) | Allowed | **Denied** (2026-05-20) — absolute path outside the worktree. Probes during this run: `ls .`, `ls README.md`, `ls docs`, `ls /home/ubuntu/data/local/orchestrate-ralph` all Allowed; `ls /tmp`, `ls /usr/bin`, `ls /etc`, `ls /home` (ancestor of worktree), `ls /` all Denied. The gate is "absolute path not contained by `realpath(cwd)`" — ancestor paths count as outside, not just sibling paths. |
-| B4 | `Bash(ls -la:*)` | `ls -la` | Allowed | **superseded** (2026-05-22) — Session A's safe-list expansion confirmed `ls` is on the built-in safe list (Findings §1), so any `ls -la …` probe would be Allowed regardless of the multi-word rule. Multi-word allow semantics are now covered by Group Bm using a non-safe-listed target (`Bash(git status:*)`). |
+| B4 | `Bash(ls -la:*)` | `ls -la` | Allowed | **superseded** — `ls` is on the Bash safe list (see Baseline), so any `ls -la …` probe would be Allowed regardless of the multi-word rule. Multi-word allow semantics are now covered by Group Bm using a non-safe-listed target (`Bash(git status:*)`). |
 | B5 | `Bash(ls -la:*)` | `ls -lah` | Allowed | superseded — see B4. |
 | B6 | `Bash(ls -la:*)` | `ls -al` (flag order swapped) | Allowed | superseded — see B4. |
 | B7 | `Bash(ls -la:*)` | `ls -la /tmp` (positional after flags) | Allowed | superseded — see B4. |
@@ -161,7 +277,7 @@ calls).
 | Cr7 | `Bash(rmdir)` | `rmdir foo bar` | Denied | Denied (2026-05-22) |
 | Cr8 | `Bash(rmdir)` | `rmdir /tmp/probe-c8` (outside-cwd path) | Denied | Denied (allow rule missing) (2026-05-22) — the exact rule doesn't match this shape; §2 never gets a turn. Probing §2 for `rmdir` requires `Bash(rmdir:*)` as the allow shape (deferred). |
 | Cr9 | `Bash(rmdir)` | `rmdir probe-c9` (cwd-relative) | Denied | Denied (2026-05-22) — same; allow rule doesn't match |
-| Cs1 | `Bash(rmdir)` (irrelevant to echo) | `echo` (bare) | unknown — depends on safe list | **Allowed** (2026-05-22) — no `Bash(echo*)` rule present; `echo` is on the built-in safe list. Updates Findings §1. |
+| Cs1 | `Bash(rmdir)` (irrelevant to echo) | `echo` (bare) | unknown — depends on safe list | **Allowed** (2026-05-22) — no `Bash(echo*)` rule present; `echo` is on the Bash safe list (see Baseline). |
 | Cs2 | same | `echo hello` | depends | Allowed (2026-05-22) — with-arg form also safe-listed |
 | Cs3 | same | `printf` (bare) | depends | Allowed (2026-05-22) — bare printf safe-listed (the Session A `printf "hi\n"` probe only confirmed the with-arg shape; this fills the gap) |
 | Cs4 | same | `yes` (bare) | Denied if not safe-listed | Denied (2026-05-22) — `yes` is genuinely not safe-listed; serves as the canonical clean negative control. |
@@ -182,7 +298,7 @@ calls).
 | ID | Allow | Command | Expected | Empirical |
 |---|---|---|---|---|
 | E1 | `Bash(echo:*)`, `Bash(tail:*)` | `echo hello \| tail -1` | Allowed | Allowed (2026-05-20) |
-| E2 | `Bash(echo:*)` only (no `tail`) | `echo hello \| tail -1` | Denied (allow rule missing) | **Allowed** (2026-05-22) — but not by pipe-bypass: `tail` is on the built-in safe list (see Findings §1, R5/R6), so every pipeline stage independently passes. Follow-up R19 (`echo hello \| env`) is Denied because `env` is neither allowed nor safe-listed, confirming pipes decompose like `&&` — every stage must clear matcher + §2. |
+| E2 | `Bash(echo:*)` only (no `tail`) | `echo hello \| tail -1` | Denied (allow rule missing) | **Allowed** (2026-05-22) — but not by pipe-bypass: `tail` is on the Bash safe list (see Baseline), so every pipeline stage independently passes. Follow-up R19 (`echo hello \| env`) is Denied because `env` is neither allowed nor safe-listed, confirming pipes decompose like `&&` — every stage must clear matcher + §2. |
 | E3 | `Bash(echo:*)` | `echo hello > /tmp/x` | Allowed | **Denied** (2026-05-20) — `/tmp/x` is outside the worktree; same path-aware gate as B3 |
 | E4 | `Bash(echo:*)` | `echo hello 2>&1 \| tail -1` (no `tail` in allow) | Denied | **Allowed** (2026-05-22) — same as E2: `tail` is safe-listed. Stderr redirect is transparent to the matcher. |
 | E5 | `Bash(echo:*)` | `echo $(whoami)` (command substitution, `whoami` unallowlisted) | Denied | Denied (2026-05-20) — note: even though `whoami` is on the built-in safe list (D3), wrapping it in `$(...)` still denies the outer call. Command substitution surfaces the inner command to the matcher and the wrapped form is rejected as a distinct shape. |
@@ -356,7 +472,7 @@ list; the discriminating probes are the Denied ones.
 Session Bf followup to Bm8. Same config as Session A (allow =
 `Bash(echo:*)` only). Probes which git subcommands run with no
 git-related allow rule present — i.e., which are on a built-in safe
-list analogous to the Bash command safe list (Findings §1).
+list analogous to the Bash command safe list (see Baseline).
 
 Rather than a full per-probe table (45 probes), the table below
 summarises by outcome class.
@@ -380,93 +496,34 @@ summarises by outcome class.
 - §2 path-locality is **not git-aware**. Outside-cwd paths pass the matcher for any safe-listed git subcommand; git's own "outside repository" check catches the obvious cases, but that's git's check, not the matcher's. A subcommand that didn't enforce outside-repo (or that read absolute paths transparently) would have access.
 - The first-token shape gate (Findings §3) remains intact: the safe list applies only to bare `git`. `/usr/bin/git log` denies — confirms the gate is independent of which command's safe list would apply.
 
-## Findings from the 2026-05-20 run
+## Cross-cutting findings
 
-Two cross-cutting behaviours surfaced that no single test row captures
-cleanly. Both contradict assumptions the doctrine relies on; both
-warrant doctrine patches.
+Behaviours that no single test row captures cleanly and that affect
+multiple assumption rows. Each section is a finding that downstream
+tests and skill-package doctrine must reflect.
 
-### 1. Built-in safe-command list (bypasses the allow list)
+### 1. Safe lists make some template entries dead weight
 
-A set of read-only commands run successfully under `dontAsk` even when
-they have no allow-rule. The 2026-05-22 Session A run (allow = only
-`Bash(echo:*)`) expanded the catalog significantly. Confirmed members:
+The safe-list memberships themselves are documented in
+[Baseline — built-in safe lists](#baseline--built-in-safe-lists)
+near the top of this doc. The doctrine implications:
 
-- **Identity / environment:** `whoami`, `pwd`, `id`, `uname`, `date`,
-  `date +%Y`, `hostname`, `groups`, `uptime`, `ps`, `ps aux`, `free`,
-  `df`, `du`.
-- **Path / metadata (no content read):** `test`, `realpath`, `readlink`,
-  `dirname`, `basename`.
-- **Content-reading (subject to §2):** `cat`, `head`, `tail`, `wc`,
-  `grep` (`ugrep` on this host), `find` (`bfs` on this host), `stat`,
-  `ls`. These run iff every positional path arg is inside `realpath(cwd)`
-  — the §2 gate fires on outside-cwd args before the safe-list check
-  has any effect.
-- **Trivial output / arithmetic:** `echo`, `printf`, `true`, `false`,
-  `seq`, `expr`. (`echo` and `printf` confirmed 2026-05-22 via Session
-  C's Cs1–Cs3 — bare and with-arg shapes both run with no rule. Note: in
-  Session A and earlier, `Bash(echo:*)` rule attributions were
-  *redundant* with the safe list — both admitted echo simultaneously.
-  The Session A conclusions about pipe decomposition still hold because
-  the load-bearing falsifications used `env` (R19), which is genuinely
-  not safe-listed.)
-- **Tool location:** `which`, `type`.
-
-Confirmed **denied** without a rule:
-
-- **Environment leaks:** `env`, `printenv`, `printenv PATH`.
-- **Mutating filesystem:** `mkdir`, `rm`, `rmdir`.
-- **Session metadata:** `tty`, `who`, `w`, `hostnamectl`,
-  `claude --version`, `command -v`, `hash`.
-- **Pipeline sources:** `yes` (Session C Cs4 confirmed bare yes Denied —
-  which is why `yes | head -1` is Denied even though `head` is
-  safe-listed; every stage must clear, see Findings §3 and assumption
-  row #3). `yes` is the canonical *non-safe-listed token* to use as a
-  negative control when a probe needs an unambiguous allow-rule
-  attribution.
-
-So "allow list" is `template allow ∪ Claude-Code's built-in safe list`,
-and the safe list is wider than initially thought — most common
-read-only Unix utilities (~25 commands) are on it. The built-in list is
-not documented; treat it as opaque and re-probe after version bumps.
-Aliases matter: `grep`→`ugrep` and `find`→`bfs` on the Linux build used
-here; flag semantics differ from GNU coreutils.
-
-Doctrine impact: any reasoning that says "if I don't allow X, the
-worker can't run X" is wrong for the safe-list commands. In particular:
-
+- Any reasoning of the form "if I don't allow X, the worker can't
+  run X" is wrong for any X on either safe list.
 - `Bash(date +%s)` and `Bash(test:*)` in
-  `setup-ralph/templates/settings.template.json` are dead weight — both
-  commands run regardless.
+  `setup-ralph/templates/settings.template.json` are dead weight —
+  both commands run regardless.
 - `Bash(cat:*)`, `Bash(head:*)`, `Bash(tail:*)`, `Bash(grep:*)`,
-  `Bash(find:*)`, `Bash(ls:*)` are also dead weight *for any path
-  inside the worktree* — the safe list covers them. They ARE still
-  load-bearing as "explicit permission to use this command across the
-  full argument shape the worker constructs" — but per §2 even the
-  explicit `Bash(<cmd>:*)` rule cannot reach outside `realpath(cwd)`,
-  so the template entries don't unlock outside-cwd access either.
-
-**There is a second built-in safe list scoped to `git` subcommands**,
-parallel to the Bash command safe list. The 2026-05-22 Session Bf
-enumeration (Group Bg) is the dedicated probe. Summary:
-
-- **Safe-listed git subcommands** (run with no `Bash(git:*)` rule):
-  `log`, `diff`, `show`, `blame`, `reflog`, `describe`, `rev-parse`,
-  `ls-files`, `status`, `cat-file`, `for-each-ref`, `stash list`,
-  `worktree list`. Plus `branch` and `tag` in bare or option-only
-  shape (`branch <name>` and `tag <name>` are denied).
-- **Read-shape git subcommands NOT safe-listed:** `config` (all
-  forms), `symbolic-ref`, `hash-object`. A worker that needs config
-  values must add `Bash(git config:*)` explicitly.
-- **`git cat-file -p <ref>` is the standout exposure** — it dumps the
-  contents of any object reachable from a ref, with no allow rule
-  required and the path-guard hook does not cover subprocess reads.
-  Worker doctrine should treat ref-reachable contents as visible to
-  any worker.
-- **§2 path-locality does NOT fire** for any safe-listed git
-  subcommand. `git status /tmp` and similar pass the matcher; git's
-  own "outside repository" check is the only thing catching obvious
-  cases.
+  `Bash(find:*)`, `Bash(ls:*)` are dead weight *for any path inside
+  the worktree* — the safe list already covers them. They remain
+  load-bearing only as explicit permission across the full argument
+  shape a worker constructs — but per §2 even the explicit
+  `Bash(<cmd>:*)` rule cannot reach outside `realpath(cwd)`, so the
+  template entries don't unlock outside-cwd access either.
+- Worker doctrine should treat ref-reachable repository contents
+  (`git cat-file -p <ref>`, plus the safe-listed read porcelain) as
+  visible to any worker under any config. The path-guard hook does
+  not cover subprocess reads; this surface is not hook-mitigable.
 
 ### 2. Argument path-locality gate (stricter than `:*` suggests)
 
