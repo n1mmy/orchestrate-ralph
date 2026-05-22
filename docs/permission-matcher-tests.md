@@ -177,9 +177,12 @@ matched", pick a target neither safe list appears to touch:
   stage in a pipe / `&&` compound probe.
 - **`rmdir`** — denied without a rule. Side-effect free in `--help`
   and `missing operand` forms.
-- **`pnpm typecheck`** — denied without a rule; canonical multi-word
-  exact-match target. Underlying command errors out before any
-  side-effect when run outside a JS project.
+- **`xprobe one` (or any fictional command pair)** — bash errors
+  `command not found` after the matcher decides. Multi-word shape
+  suitable for testing `Bash(<x> <y>:*)` and `Bash(<x> <y>)` rules.
+  Doesn't depend on any installed tool, so probes stay reproducible
+  across hosts and tool-version drift can't change the matcher
+  attribution.
 
 Conversely, when a probe's load-bearing outcome is "Denied because
 the rule didn't reach", a safe-listed target obscures the result:
@@ -198,9 +201,9 @@ assumption; the doc is most useful once each row has a result.
 | # | Assumption | Where it lives | Test(s) | Status |
 |---|---|---|---|---|
 | 1 | `:*` after a command name allowlists "any suffix" | `setup-ralph/SKILL.md` step 3; common template entries like `Bash(git:*)` | A1–A5 | pending — Group A reframed to `Bash(rmdir:*)`, all probes unrun. Multi-word `:*` semantics confirmed independently via Group Bm: Bm9–Bm11 (word-boundary on both first-token and trailing edges) and Bm16 (position-locked at argv 0/1). Bounded by §2 path-locality: under `:*`, absolute outside-cwd paths still deny for commands on the §2 list (Baseline). B3 will re-probe this boundary for `rmdir` under an explicit allow rule. |
-| 2 | A bare command name with no `:*` is an exact match | `Bash(date +%s)` in the template uses this shape | Cr1–Cr9 (single-word `rmdir`); C5, D2–D5 (multi-word `pnpm typecheck`) | **confirmed** — single-word: Cr1 Allowed (bare matches the exact rule); Cr2–Cr9 all Denied (any suffix — flag, positional, empty quoted arg, extra whitespace — fails the exact match). Multi-word: C5 Allowed (bare matches); D2–D5 all Denied (flag, positional, bare leader, different subcommand). Both targets are non-safe-listed per Baseline so Allowed outcomes attribute to the rule. |
-| 3 | Compound shapes (`&&` / `||` / `;` / pipes / redirects / subshells) are distinct patterns from their parts and fail when not explicitly allowlisted | `ORCHESTRATOR.md` "Bash command shape"; `PROMPT.md` "Bash command shape" | D1–D6, E1–E6 (rmdir-based, unrun); D6–D10, D-bonus (pnpm-based, confirmed) | confirmed at the multi-word leading-stage level via the pnpm-typecheck rows in Group E: D6 (`pnpm typecheck \| env` Denied), D7 (with stderr redirect, Denied), D9 (`pnpm typecheck && env` Denied), D-bonus (`pnpm typecheck \| cat /tmp/x` Denied via §2 on downstream stage). Each demonstrates per-stage gating regardless of where the matching stage lives. Subshell rejection preserved as Cross-cutting Finding §5. The reframed D1, D3–D6 / E1–E6 (rmdir-based) are unrun — re-running will close the loop for single-word leading stages. |
-| 4 | The matcher decomposes `&&`-chained compounds and checks each half against allow + deny | `ORCHESTRATOR.md` step 6 implicitly; permission-denied worker doctrine | D2 (deny on right), D9 (allow-missing on right) | confirmed — D2 (rmdir-based, unrun) probes the deny-rule case on the right half; D9 (`pnpm typecheck && env`, confirmed Denied) probes the allow-missing case on the right half. Either suffices to falsify "matcher treats `&&` as one shape"; together they cover both denial mechanisms. |
+| 2 | A bare command name with no `:*` is an exact match | `Bash(date +%s)` in the template uses this shape | Cr1–Cr9 (single-word `rmdir`); C5–C9 (multi-word `xprobe one`) | single-word confirmed (2026-05-22) — Cr1 Allowed (bare matches the exact rule); Cr2–Cr9 all Denied (any suffix — flag, positional, empty quoted arg, extra whitespace — fails the exact match). Multi-word pending — C5–C9 reframed to the fictional `Bash(xprobe one)`, all probes unrun. Both targets non-safe-listed per Baseline. |
+| 3 | Compound shapes (`&&` / `||` / `;` / pipes / redirects / subshells) are distinct patterns from their parts and fail when not explicitly allowlisted | `ORCHESTRATOR.md` "Bash command shape"; `PROMPT.md` "Bash command shape" | D1–D6 (single-word `rmdir`); E1–E12 (mixed) | pending re-probe across the rebased catalog. Single-word leading stage covered by Group D (rmdir + env) and Group E E1–E6 (rmdir + env + subshell). Multi-word leading stage covered by Group E E7–E12 (xprobe one + env / rmdir / cat). All probes unrun. The principle holds in Cross-cutting Finding §3 (per-stage gating across allow / safe list / §2) and §5 (subshell rejection); the catalog rebase closes the loop with non-safe-listed and target-agnostic probes. |
+| 4 | The matcher decomposes `&&`-chained compounds and checks each half against allow + deny | `ORCHESTRATOR.md` step 6 implicitly; permission-denied worker doctrine | D2 (deny on right), E10 (allow-missing on right) | pending — D2 (rmdir + cd deny rule) probes the deny-rule case on the right half; E10 (xprobe one + env, no env allow rule) probes the allow-missing case. Either suffices to falsify "matcher treats `&&` as one shape"; together they cover both denial mechanisms. |
 | 5 | A flag-bearing variant of an allowlisted command (e.g. `rmdir --help`) is matched by `Bash(<cmd>:*)` | various template entries assume this | B1, B2, B4; Bm1–Bm17 | confirmed at the multi-word level via Bm1–Bm6 (`:*` accepts flags, `=`-suffixed flags, multiple flags). Bm9–Bm11 confirm strict word-boundary on both sides; Bm14 confirms §2 is command-specific; Bm16 confirms position-locking at argv 0/1. Single-word side reframed to `Bash(rmdir:*)` (Group B), all probes unrun — pending re-probe to close the loop for short-command `:*` rules. |
 | 6 | Worker subagents launched with `isolation: "worktree"` inherit the orchestrator's loaded `.claude/settings.local.json` (allowlist, deny, `dontAsk`, hook) | `ORCHESTRATOR.md` prereq #2; ADR 0004 | Session F (2026-05-22) — see `docs/subagent-permission-tests.md` "Resolved 2026-05-22" section | **confirmed end-to-end**. All four mechanisms propagate: deny block (P1 `git remote -v` clean deny), `dontAsk` (P3 `env` clean deny), path-guard hook with branded `Path-guard:` message (P2 `Write /tmp/...` — load-bearing test), and auto-isolation cwd (P5). `Agent` tool is NOT in any subagent's inventory under any variant (P4 + V1–V4), so orchestrator-as-subagent remains structurally impossible. |
 | 7 | Top-level tools (`Write`, `Read`, `Edit`, `Agent`, `Glob`, `Grep`) need explicit allow entries under `dontAsk`, else they auto-deny | settings template lists them; ADR 0004 names `Agent` as the load-bearing one | T1–T5 | **falsified for most tools — split into per-tool behaviour** (see Findings §4). Gated: `Write` (T2), `Edit` (T5). Auto-permitted under `dontAsk`: `Read` (T3), `Agent` (T1), `NotebookEdit` (T4). Unobservable on this host: `Glob`, `Grep` (the v2.1.117+ Linux build drops them entirely). Practical impact: the template's `Read`/`Agent`/`Glob`/`Grep` entries are dead weight under `dontAsk`; `Write`/`Edit` are load-bearing. |
@@ -228,7 +231,7 @@ outcome is Allowed needs a target that the Baseline section lists as
 non-safe-listed, otherwise the safe list runs the command and the
 allow rule under test isn't exercised. The Negative-control targets
 subsection of Baseline lists canonical picks (`yes`, `env`, `rmdir`,
-`pnpm typecheck`). Where a destructive command is needed, `cd .` is a
+`xprobe one`). Where a destructive command is needed, `cd .` is a
 genuine no-op under Claude Code (cwd does not persist across `Bash`
 calls).
 
@@ -269,12 +272,11 @@ on a non-empty directory.
 
 | ID | Allow | Command | Expected | Empirical |
 |---|---|---|---|---|
-| C5 | `Bash(pnpm typecheck)` | `pnpm typecheck` | Allowed | Allowed (2026-05-22) — D1: bare multi-word matches the exact rule. Underlying pnpm errored (no package.json) but the matcher decided before exec. |
-| C6 | `Bash(pnpm typecheck)` | `pnpm typecheck 2>&1 \| tail -30` | Denied | Expected revised after `tail` confirmed safe-listed in Session A. **Allowed** (2026-05-22) — D8: both pipeline stages clear (pnpm via the exact rule, tail via the safe list). The compound-decomposition story is intact — D6 (`pnpm typecheck \| env`) is **Denied** because `env` is genuinely not safe-listed; see new E-series rows below. |
-| D2 | `Bash(pnpm typecheck)` (exact) | `pnpm typecheck --watch` | Denied | Denied (2026-05-22) — confirms multi-word exact is genuinely exact (no implicit `:*`); same shape as Cr2 for single-word exact. |
-| D3 | same | `pnpm typecheck src` (positional suffix) | Denied | Denied (2026-05-22) — positional arg also rejected by exact match. |
-| D4 | same | `pnpm` (bare command) | Denied | Denied (2026-05-22) — no rule for bare `pnpm`; not safe-listed. |
-| D5 | same | `pnpm install` (different subcommand) | Denied | Denied (2026-05-22) — multi-word exact doesn't match a different subcommand. |
+| C5 | `Bash(xprobe one)` | `xprobe one` (bare match) | Allowed (matcher passes; bash then errors "command not found") | |
+| C6 | `Bash(xprobe one)` | `xprobe one --watch` (flag suffix) | Denied (exact match doesn't accept suffix) | |
+| C7 | `Bash(xprobe one)` | `xprobe one src` (positional suffix) | Denied | |
+| C8 | `Bash(xprobe one)` | `xprobe` (bare leader only, no subcommand) | Denied | |
+| C9 | `Bash(xprobe one)` | `xprobe two` (different subcommand) | Denied | |
 | Cr1 | `Bash(rmdir)` | `rmdir` | Allowed | Allowed (2026-05-22) — bare token matches the exact rule; underlying `rmdir` errored `missing operand` but that's after the matcher |
 | Cr2 | `Bash(rmdir)` | `rmdir foo` | Denied (allow rule missing) | Denied (2026-05-22) — exact-match does NOT accept any suffix token |
 | Cr3 | `Bash(rmdir)` | `rmdir ""` (empty quoted arg) | Denied | Denied (2026-05-22) — empty quoted arg still counts as a suffix |
@@ -323,12 +325,12 @@ unwritable as a safety net.
 | E4 | `Bash(rmdir:*)` only (no `Bash(env)`) | `rmdir probe-e4-dne 2>&1 \| env` | Denied (stderr redirect doesn't disguise the env stage) | |
 | E5 | `Bash(rmdir:*)` | `rmdir $(echo probe-e5)` (subshell substitution) | Denied (subshell shape rejected) | |
 | E6 | `Bash(rmdir:*)` | `` rmdir `echo probe-e6` `` (backtick substitution) | Denied (backtick shape rejected) | |
-| E7 | `Bash(pnpm typecheck)` (exact) | `pnpm typecheck 2>&1 \| tail -30` | Denied | Expected revised — `tail` is safe-listed (Session A R5/R6). **Allowed** (2026-05-22, D8) — both stages clear; the catalog originally expected Denied under the false premise that `tail` needed a rule. |
-| D6 | `Bash(pnpm typecheck)` + `Bash(rmdir:*)`; NO `Bash(echo:*)` | `pnpm typecheck \| env` | Denied | Denied (allow rule missing) (2026-05-22) — `env` is not safe-listed (Session A); compound decomposes per assumption #3, and the env stage fails to clear. The discriminating test for "does the compound rule bypass per-stage gating when the leader is multi-word?" — confirms it does not. |
-| D7 | same | `pnpm typecheck 2>&1 \| env` | Denied | Denied (2026-05-22) — stderr redirect doesn't disguise the compound from the matcher. |
-| D9 | same | `pnpm typecheck && env` | Denied | Denied (2026-05-22) — `&&` decomposes; the env half fails to clear. Re-confirms assumption #4 with a multi-word leading stage. |
-| D10 | same | `pnpm typecheck && rmdir nonexistent-d10` | Allowed | Allowed (2026-05-22) — both halves clear (pnpm via the exact rule, rmdir via `Bash(rmdir:*)`); runtime short-circuits on pnpm's missing-package.json error so rmdir doesn't actually run, but matcher passed both. |
-| D-bonus | same | `pnpm typecheck \| cat /tmp/x` | Denied | Denied (2026-05-22) — §2 fires on the downstream `cat /tmp/x` (outside-cwd path arg to a §2-listed command) even though the leading stage clears via the multi-word rule. Confirms §2 fires per pipeline stage independently of where the allowed stage lives — matches Session A R23 with a multi-word leader. |
+| E7 | `Bash(xprobe one)` (exact) | `xprobe one 2>&1 \| tail -1` (multi-word + safe-listed second stage) | Allowed (both stages clear; tail via safe list) | |
+| E8 | `Bash(xprobe one)` only (no `Bash(env)`) | `xprobe one \| env` (multi-word + non-safe-listed second stage) | Denied (env stage fails allow check; pipe decomposes per-stage even with multi-word leader) | |
+| E9 | `Bash(xprobe one)` only | `xprobe one 2>&1 \| env` (stderr redirect doesn't disguise) | Denied | |
+| E10 | `Bash(xprobe one)` only | `xprobe one && env` (`&&` decomposes with multi-word leader) | Denied | |
+| E11 | `Bash(xprobe one)`, `Bash(rmdir:*)` | `xprobe one && rmdir probe-e11-dne` (both halves match different rules) | Allowed | |
+| E12 | `Bash(xprobe one)` | `xprobe one \| cat /tmp/probe-e12` (§2 fires on downstream cat) | Denied (§2 on downstream stage despite leading-stage match) | |
 
 E2 is the discriminating probe. If pipes were intra-command (the
 whole pipeline treated as one command, prefix-matched), E2 would be
