@@ -1,11 +1,15 @@
 ---
-name: orchestrate-ralph
-description: Run a Ralph loop as an interactive orchestrator that dispatches worker sub-agents in parallel waves to grind a project's issue tracker to done. Use when asked to "orchestrate ralph", run the Ralph loop, or drive the issue tracker with sub-agents.
+name: orchestrate-ralph-parallel
+description: Run a Ralph loop in parallel-wave mode (multiple worker sub-agents per round). Requires `parallel-safe: true` in `docs/agents/ralph.md`. For the single-worker (canonical) loop, see `/orchestrate-ralph`.
 ---
 
-# Orchestrate Ralph
+# Orchestrate Ralph (parallel)
 
-Run the interactive Ralph orchestrator over this repo's issue tracker.
+Run the interactive Ralph orchestrator over this repo's issue tracker, in
+parallel-wave mode.
+
+Accepts an optional argument **`N`** — the wave width (default `5`). The
+orchestrator passes this through as `MAX_PARALLEL`.
 
 ## Prerequisites — check first, stop if any is missing
 
@@ -26,6 +30,12 @@ no `Bash` is needed at all.
    `git worktree` satisfies all of this and keeps the run off the user's
    primary checkout — strongly preferred. If you are in the primary
    checkout, stop and ask before proceeding.
+3. **The repo declares itself parallel-safe.** `docs/agents/ralph.md` must
+   contain `parallel-safe: true`. If absent or `false`, stop and tell the
+   user that this repo's tracker has no readable dependency relation
+   suitable for parallel waves — run `/orchestrate-ralph` instead. This
+   flag is a capability declaration; the single-worker skill does not
+   read it.
 
 ## Session setup — placement and restart
 
@@ -43,7 +53,7 @@ Three states:
 1. **`.claude/settings.local.json` does not exist.** Copy
    `.ralph/settings.json` to it. Then **halt with restart instructions:**
    *"Settings placed. Exit claude (`/quit`) and re-launch it from this
-   worktree, then run `/orchestrate-ralph` again. Claude Code loads settings
+   worktree, then run `/orchestrate-ralph-parallel` again. Claude Code loads settings
    at session startup; this session predates the placement."*
 
 2. **It exists and differs from `.ralph/settings.json`.** Never touch it
@@ -56,7 +66,7 @@ Three states:
    starter scaffolding claude auto-created in this worktree — not
    accumulated history. In that case, halt with a *suggestion* the user
    can take or leave: they may remove the file (`rm
-   .claude/settings.local.json`) and re-run `/orchestrate-ralph`, which
+   .claude/settings.local.json`) and re-run `/orchestrate-ralph-parallel`, which
    will place `.ralph/settings.json` and prompt for the claude restart;
    make explicit that you are not doing this yourself because the file
    *might* still be valuable to them. If the file is substantial — many
