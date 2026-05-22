@@ -74,6 +74,52 @@ the supposedly-denying allow rule *added*: if the outcome is Allowed,
 the original deny was "allow rule missing"; if it's still Denied,
 the original was "deny rule."
 
+### Driving the catalog with a Claude session
+
+Paste the prompt below into a fresh Claude Code session launched in
+the probe worktree under the settings allow list the first group
+needs. The session will run probes, classify outcomes, fill Empirical
+cells, and pause when the next group needs a different allow list.
+
+```text
+You're filling in the Empirical column of the catalog in
+docs/permission-matcher-tests.md. For each probe row:
+
+1. Compare the row's Allow column against the current
+   .claude/settings.local.json. If they differ, STOP and tell me
+   which settings to place and restart you under — claude reads
+   settings at session start only.
+2. Confirm enforcement is active: run `cd .` as a bare Bash call.
+   It must error "Denied by permissions" with no prompt. A prompt
+   means STOP; the session isn't enforced and the outcomes are
+   meaningless.
+3. Run the probe's Command exactly as written. Classify the result
+   into Allowed / Denied (allow rule missing) / Denied (deny rule) /
+   Prompted, per the four outcome buckets in the Procedure section.
+   A Prompted outcome means STOP and re-verify setup.
+4. Fill in the Empirical cell with the outcome, today's date, and
+   one line of non-obvious attribution if the result diverges from
+   Expected.
+5. If the result diverges from Expected, also update the relevant
+   assumption-table Status and grep the skill-package doctrine for
+   text that relied on the old behaviour — patch in the same change.
+
+Probes are designed to be side-effect safe even when the matcher
+unexpectedly Allows. DO NOT adjust arguments to "make a probe pass";
+a probe failing to deny as expected is itself the load-bearing
+falsification.
+
+Start with whichever group's allow list is currently placed and
+work through its rows. After each group, summarise what ran, what
+diverged, and pause so I can swap settings + restart you under the
+next group's allow list before continuing.
+```
+
+The operator's job: launch the probe session under the right
+settings, paste the prompt, watch for STOP signals, and swap
+settings + restart between groups when the agent reports it's done
+with the current allow list.
+
 ## Baseline — built-in safe lists
 
 We believe the matcher runs **at least two** built-in safe lists in
