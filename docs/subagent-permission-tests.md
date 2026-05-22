@@ -144,23 +144,44 @@ Clean up afterwards: `rm -rf .claude .ralph`.
 
 Every scenario runs the same five probes inside the layer being tested.
 Each probe has a single expected outcome under enforcement, and a single
-fallback under non-enforcement.
+fallback under non-enforcement. Probe targets are picked to avoid the
+Bash safe lists documented in
+[`permission-matcher-tests.md`'s Baseline](permission-matcher-tests.md#baseline--built-in-safe-lists)
+— otherwise an Allowed outcome attributes to the safe list rather than
+to the gate the probe is testing.
 
 | Probe | Call | Under enforcement | Under non-enforcement |
 |---|---|---|---|
-| **P1** — `deny` block | `Bash` `git remote -v` (or `cd .`) | clean tool error ("Denied by permissions"), **no prompt** | command runs and returns data |
-| **P2** — path-guard hook | `Write` `/tmp/probe-<sha>.txt` content `probe` | clean tool error with `"Path-guard: …"` branded message | succeeds silently, or prompts the user (if `/tmp` writes aren't in user's interactive allowlist) |
-| **P3** — `dontAsk` auto-deny | `Bash` `whoami` (or any unallowlisted command) | clean tool error, **no prompt** | succeeds silently, or prompts the user |
-| **P4** — `Agent` tool availability | invoke `Agent` with any `subagent_type` and a trivial prompt | call succeeds | call succeeds (parent's tool inventory) |
-| **P5** — tool inventory + cwd | report which tools are available; report `cwd` via `Bash pwd` | reports inventory + isolation cwd | reports inventory + parent's cwd (or isolation cwd, depending on type) |
+| **P1** — `deny` block | `Bash` `cd .` | Denied (deny rule) — `"with command cd . has been denied"` form | Prompted (the user's interactive defaults don't auto-allow `cd`) |
+| **P2** — path-guard hook | `Write` `/tmp/probe-<sha>.txt` content `probe` | Denied (path-guard hook) — branded `"Path-guard: …"` prefix | Prompted (the user's interactive defaults don't auto-allow `Write` to `/tmp`) |
+| **P3** — `dontAsk` auto-deny | `Bash` `env` | Denied (allow rule missing) — `"don't ask mode"` form | Prompted (no `dontAsk` in effect; `env` not safe-listed) |
+| **P4** — `Agent` tool availability | invoke `Agent` with any `subagent_type` and a trivial prompt | parent: call succeeds (Agent in parent's inventory). worker: call fails — Agent absent from inventory ([Baseline](#subagent-tool-inventory-current-understanding)) | same as enforced (tool inventory is structural, not permission-mediated) |
+| **P5** — tool inventory + cwd | report which tools are available; report `cwd` via `Bash pwd` | reports inventory + isolation cwd | reports inventory + parent's cwd or isolation cwd (see [Baseline auto-isolation](#auto-isolation-is-subagent-type-dependent)) |
 
-**Distinguishing a tool error from a user-denied prompt is critical.**
-A prompt that the user denies looks superficially like an enforced deny,
-but means the *opposite* — enforcement is not in effect, the system fell
-back to asking the operator. The probe must record the path: clean
-tool-error → enforced; prompt-then-denied → not enforced. The
-`"Path-guard: …"` branded message in P2 is the strongest single signal
-that the hook actually fired.
+**Probe-target rationale:**
+
+- P1 uses `cd .` because `Bash(cd:*)` is in the standard template's
+  deny block, `cd` is not on the Bash safe list, and `cd .` is a no-op
+  even if the matcher unexpectedly Allows (cwd does not persist between
+  Bash calls). `git remote -v` would also fire the deny block via
+  `Bash(git remote:*)`, but `cd .` is the cleaner choice — no
+  side-effect surface at all.
+- P3 uses `env` (not `whoami`). `whoami` is on the Bash safe list, so
+  under enforcement it Allows regardless of `dontAsk` — falsifying the
+  probe's load-bearing direction. `env` is non-safe-listed per
+  Baseline, so a `dontAsk` deny attributes unambiguously to the auto-
+  deny mechanism.
+- P2's load-bearing signal is the branded `Path-guard:` prefix
+  ([Baseline deny shapes](#deny-shapes--message-form-distinctions));
+  no other gate produces that string.
+- P4 and P5 test structural inventory rather than permission shape,
+  so safe-list confound does not apply.
+
+Outcome classification follows
+[Baseline's deny-shape vocabulary](#deny-shapes--message-form-distinctions):
+clean tool-error → enforced (one of three distinct message forms);
+prompt-then-denied → not enforced; STOP and re-verify setup before
+relying on downstream outcomes.
 
 ## Scenarios
 
@@ -183,15 +204,16 @@ The architecture the loop ships with. Set up:
 Expected:
 
 - User session under enforcement → all five probes show enforced
-  behaviour (P1 + P3 clean denies, P2 hits the branded hook, P4 succeeds
-  because `Agent` is in the user session's allowlist, P5 reports the
-  full inventory and the worktree cwd).
-- Worker (subagent of an enforced parent) → expected to inherit
-  enforcement one level deeper. P1 + P2 + P3 should all deny cleanly;
-  P4 may or may not work depending on whether the orchestrator needs
-  subsubagents (it doesn't, but it tests the harness assumption).
-  **This sub-scenario is the open item in ADR 0004** — verify
-  empirically before relying on the inheritance story for workers.
+  behaviour. P1 hits the deny-rule message form, P2 the branded
+  `Path-guard:` prefix, P3 the `dontAsk` "don't ask mode" form, P4
+  succeeds (Agent is in the parent's inventory), P5 reports full
+  inventory and worktree cwd.
+- Worker (subagent of an enforced parent) → all four enforcement
+  mechanisms propagate per
+  [Baseline](#subagent-enforcement-propagation-current-understanding).
+  P1 + P2 + P3 deny cleanly; P4 fails (Agent absent from worker's
+  inventory) regardless of the orchestrator's needs. P5 reports the
+  worker's own auto-isolation cwd, not the parent's.
 
 ### 2. Original (unenforced) architecture — user session pre-placement
 
@@ -205,16 +227,18 @@ scenario should still describe what happens.
 3. Run the five probes against the user session.
 4. Dispatch a worker subagent and run the five probes inside it.
 
-Expected (per Phase 1, session bridge-cse_01LUQ7…):
+Expected:
 
 - User session: `.claude/settings.local.json` was not loaded at startup;
-  the user session runs on interactive defaults. P1/P3 likely succeed
-  (git, whoami often on user allowlist). P2 prompts the user (Write
-  outside cwd usually unlisted). No enforcement.
-- Workers spawned from the unenforced user session: P1/P3 succeed; P2
-  prompts and the user denies (no branded hook message); P4 typically
-  absent from subagent toolset; `Agent`-tool propagation has never been
-  observed.
+  the session runs on interactive defaults. P1 (`cd .`), P2 (`Write`
+  outside cwd), and P3 (`env`) all Prompt the user — none are on the
+  user's interactive allowlist by default; the harness asks. No
+  enforcement.
+- Workers spawned from this unenforced parent: per
+  [Baseline](#subagent-enforcement-propagation-current-understanding),
+  none of the four mechanisms propagate. P1/P3 Prompt; P2 Prompts with
+  no branded `Path-guard:` message; P4 fails (`Agent` absent from
+  every subagent's inventory regardless of parent enforcement).
 
 ### Rejected variants — orchestrator-as-subagent
 
@@ -226,6 +250,17 @@ instead of re-derivation.
 The setup is the same for all four: `.claude/settings.local.json` placed
 mid-session, then the user session dispatches a single `Agent` call
 running the five probes. Vary only `subagent_type` and `isolation`.
+
+V1–V4 predate the P3 target switch from `whoami` to `env`. **P3
+results below are confounded by the Bash safe list** — `whoami` is on
+the safe list ([matcher catalog Baseline](permission-matcher-tests.md#bash-command-safe-list-current-understanding)),
+so it would have Allowed regardless of whether `dontAsk` was in
+effect. The "no propagation" finding for `dontAsk` rests not on P3
+but on P1 (`Bash git remote -v` Allowed under a placed deny block) and
+P2 (`Write /tmp/...` prompted with no `Path-guard:` brand under a
+placed hook) — those two outcomes are uninterpretable except as the
+deny block and hook failing to propagate. Re-running V1–V4 with P3
+switched to `env` would close the small remaining gap.
 
 #### V1 — `subagent_type: "general-purpose"`, no `isolation`
 
