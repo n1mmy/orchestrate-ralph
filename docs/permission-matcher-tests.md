@@ -86,7 +86,7 @@ assumption; the doc is most useful once each row has a result.
 | # | Assumption | Where it lives | Test(s) | Status |
 |---|---|---|---|---|
 | 1 | `:*` after a command name allowlists "any suffix" | `setup-ralph/SKILL.md` step 3; common template entries like `Bash(git:*)` | A1–A5 | partial — A1–A5 confirmed for flag-only suffixes; B3 falsifies for absolute paths outside the worktree when the command is on the §2 path-typed list (`ls`, `cat`, `head`, `tail`, `wc`, `grep`, `find`, `stat`); 2026-05-22 Bm14 shows §2 does NOT fire for commands off that list (`git status /tmp` Allowed by matcher) — see Findings §2 update. |
-| 2 | A bare command name with no `:*` is an exact match | `Bash(date +%s)` in the template uses this shape | C1–C4 | falsified — C4 ran despite the rule being exact; `date` is on Claude Code's built-in safe-command list and bypasses the allow check entirely. C1/C2 not isolated (see findings). |
+| 2 | A bare command name with no `:*` is an exact match | `Bash(date +%s)` in the template uses this shape | C3, C4 superseded; Cr1–Cr9 | **confirmed** (2026-05-22) — Cr1 Allowed (`rmdir` bare matches the exact rule); Cr2–Cr9 all Denied (any suffix — flag, positional, empty quoted arg, extra whitespace — fails the exact match). The earlier "falsified" reading was a safe-list confound: `Bash(date +%s)` couldn't be isolated because `date` is safe-listed, and `Bash(echo)` couldn't either because `echo` is safe-listed too (S1 in Findings §1). Using `Bash(rmdir)` (non-safe-listed per group-m M0) gives a clean test and the assumption holds. |
 | 3 | Compound shapes (`&&` / `||` / `;` / pipes / redirects / subshells) are distinct patterns from their parts and fail when not explicitly allowlisted | `ORCHESTRATOR.md` "Bash command shape"; `PROMPT.md` "Bash command shape"; the live-run-doctrine commits | D1–D6, E1–E7, R19–R23 | confirmed — every stage of a compound (whether `&&` / `;` / pipe) must independently clear allow-or-safe-list AND the §2 path-locality gate. R19 (`echo hello \| env` Denied), R21 (`env \| echo hi` Denied), R23 (`echo hello \| cat /etc/issue` Denied) lay this out for pipes; D1–D6 covered the other separators. E5/E6 confirm subshells don't bypass. D3's earlier "Allowed" anomaly was the safe-list, not pipe-decomposition. |
 | 4 | The matcher decomposes `&&`-chained compounds and checks each half against allow + deny | `ORCHESTRATOR.md` step 6 implicitly; permission-denied worker doctrine | D1, D2, D3 | confirmed — D2 catches a deny on the right half; follow-up probe `echo a && env` is denied because `env` is denied alone. D3 was Allowed only because the right half is on the built-in safe list. |
 | 5 | A flag-bearing variant of an allowlisted command (e.g. `ls -la`) is matched by `Bash(<cmd>:*)` | various template entries assume this | B1, B2, B4–B7 superseded; Bm1–Bm17 | confirmed — Bm1–Bm6 confirm `:*` accepts arbitrary suffix (flags, `=`-suffixed flags, multiple flags). Bm9–Bm11 confirm strict word-boundary on both sides. Bm14 confirms §2 is command-specific (does not fire for `git status`). Bm16 confirms multi-word rules are position-locked at argv 0/1 — a leading flag like `git -c X status` does NOT match `Bash(git status:*)`. Group B's original B4–B7 (`Bash(ls -la:*)`) were superseded by Group Bm using a non-safe-listed target because Session A confirmed `ls` is safe-listed. |
@@ -142,12 +142,25 @@ calls).
 
 | ID | Allow | Command | Expected | Empirical |
 |---|---|---|---|---|
-| C1 | `Bash(echo)` | `echo` | Allowed | not run — current session has `Bash(echo:*)`, so the no-`:*` rule's behaviour is masked |
-| C2 | `Bash(echo)` | `echo hello` | Denied (allow rule missing) | not run — same |
+| C1 | `Bash(echo)` | `echo` | Allowed | superseded (2026-05-22) — `echo` is on the built-in safe list (Cs1 below), so `Bash(echo)` cannot be discriminated from "no rule + safe list" with this target. See Cr1–Cr9 for exact-match probes with `Bash(rmdir)` (a non-safe-listed target). |
+| C2 | `Bash(echo)` | `echo hello` | Denied (allow rule missing) | superseded — see C1; Cs2 below confirms `echo hello` also runs via safe list with no rule. |
 | C3 | `Bash(date +%s)` | `date +%s` | Allowed | Allowed (2026-05-20) — but follow-up probes show `date`, `date +%Y` also Allowed, so the rule is not load-bearing; `date` is on the built-in safe-command list |
 | C4 | `Bash(date +%s)` | `date +%s -u` | Denied | **Allowed** (2026-05-20) — same: `date` is on the built-in safe list |
 | C5 | `Bash(pnpm typecheck)` | `pnpm typecheck` | Allowed | not run — needs `Bash(pnpm typecheck)` in allow |
 | C6 | `Bash(pnpm typecheck)` | `pnpm typecheck 2>&1 \| tail -30` | Denied | not run — same |
+| Cr1 | `Bash(rmdir)` | `rmdir` | Allowed | Allowed (2026-05-22) — bare token matches the exact rule; underlying `rmdir` errored `missing operand` but that's after the matcher |
+| Cr2 | `Bash(rmdir)` | `rmdir foo` | Denied (allow rule missing) | Denied (2026-05-22) — exact-match does NOT accept any suffix token |
+| Cr3 | `Bash(rmdir)` | `rmdir ""` (empty quoted arg) | Denied | Denied (2026-05-22) — empty quoted arg still counts as a suffix |
+| Cr4 | `Bash(rmdir)` | `rmdir  foo` (two spaces) | Denied | Denied (2026-05-22) — extra whitespace is not normalised; the second space + foo is a suffix |
+| Cr5 | `Bash(rmdir)` | `rmdir --help` | Denied | Denied (2026-05-22) — a flag arg is still a suffix |
+| Cr6 | `Bash(rmdir)` | `rmdir -p foo` | Denied | Denied (2026-05-22) |
+| Cr7 | `Bash(rmdir)` | `rmdir foo bar` | Denied | Denied (2026-05-22) |
+| Cr8 | `Bash(rmdir)` | `rmdir /tmp/probe-c8` (outside-cwd path) | Denied | Denied (allow rule missing) (2026-05-22) — the exact rule doesn't match this shape; §2 never gets a turn. Probing §2 for `rmdir` requires `Bash(rmdir:*)` as the allow shape (deferred). |
+| Cr9 | `Bash(rmdir)` | `rmdir probe-c9` (cwd-relative) | Denied | Denied (2026-05-22) — same; allow rule doesn't match |
+| Cs1 | `Bash(rmdir)` (irrelevant to echo) | `echo` (bare) | unknown — depends on safe list | **Allowed** (2026-05-22) — no `Bash(echo*)` rule present; `echo` is on the built-in safe list. Updates Findings §1. |
+| Cs2 | same | `echo hello` | depends | Allowed (2026-05-22) — with-arg form also safe-listed |
+| Cs3 | same | `printf` (bare) | depends | Allowed (2026-05-22) — bare printf safe-listed (the Session A `printf "hi\n"` probe only confirmed the with-arg shape; this fills the gap) |
+| Cs4 | same | `yes` (bare) | Denied if not safe-listed | Denied (2026-05-22) — `yes` is genuinely not safe-listed; serves as the canonical clean negative control. |
 
 ### Group D — command separators (assumptions #3, #4)
 
@@ -376,19 +389,28 @@ they have no allow-rule. The 2026-05-22 Session A run (allow = only
   `ls`. These run iff every positional path arg is inside `realpath(cwd)`
   — the §2 gate fires on outside-cwd args before the safe-list check
   has any effect.
-- **Trivial output / arithmetic:** `printf`, `true`, `false`, `seq`,
-  `expr`.
+- **Trivial output / arithmetic:** `echo`, `printf`, `true`, `false`,
+  `seq`, `expr`. (`echo` and `printf` confirmed 2026-05-22 via Session
+  C's Cs1–Cs3 — bare and with-arg shapes both run with no rule. Note: in
+  Session A and earlier, `Bash(echo:*)` rule attributions were
+  *redundant* with the safe list — both admitted echo simultaneously.
+  The Session A conclusions about pipe decomposition still hold because
+  the load-bearing falsifications used `env` (R19), which is genuinely
+  not safe-listed.)
 - **Tool location:** `which`, `type`.
 
 Confirmed **denied** without a rule:
 
 - **Environment leaks:** `env`, `printenv`, `printenv PATH`.
-- **Mutating filesystem:** `mkdir`, `rm`.
+- **Mutating filesystem:** `mkdir`, `rm`, `rmdir`.
 - **Session metadata:** `tty`, `who`, `w`, `hostnamectl`,
   `claude --version`, `command -v`, `hash`.
-- **Pipeline sources:** `yes` (which is why `yes | head -1` is Denied
-  even though `head` is safe-listed — every stage must clear, see
-  Findings §3 and assumption row #3).
+- **Pipeline sources:** `yes` (Session C Cs4 confirmed bare yes Denied —
+  which is why `yes | head -1` is Denied even though `head` is
+  safe-listed; every stage must clear, see Findings §3 and assumption
+  row #3). `yes` is the canonical *non-safe-listed token* to use as a
+  negative control when a probe needs an unambiguous allow-rule
+  attribution.
 
 So "allow list" is `template allow ∪ Claude-Code's built-in safe list`,
 and the safe list is wider than initially thought — most common
