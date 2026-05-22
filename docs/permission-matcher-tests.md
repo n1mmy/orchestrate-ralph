@@ -87,12 +87,12 @@ assumption; the doc is most useful once each row has a result.
 |---|---|---|---|---|
 | 1 | `:*` after a command name allowlists "any suffix" | `setup-ralph/SKILL.md` step 3; common template entries like `Bash(git:*)` | A1–A5 | partial — A1–A5 confirmed for flag-only suffixes; B3 falsifies for absolute paths outside the worktree (see findings) |
 | 2 | A bare command name with no `:*` is an exact match | `Bash(date +%s)` in the template uses this shape | C1–C4 | falsified — C4 ran despite the rule being exact; `date` is on Claude Code's built-in safe-command list and bypasses the allow check entirely. C1/C2 not isolated (see findings). |
-| 3 | Compound shapes (`&&` / `||` / `;` / pipes / redirects / subshells) are distinct patterns from their parts and fail when not explicitly allowlisted | `ORCHESTRATOR.md` "Bash command shape"; `PROMPT.md` "Bash command shape"; the live-run-doctrine commits | D1–D6, E1–E7 | partial — E5/E6 confirm subshells don't bypass; D1/D4/D5/D6 confirm separators are matched per-segment; E3 confirms redirects to outside-workspace are gated; D3 falsifies for the "allow rule missing" subcase when the unallowlisted segment is on the built-in safe list (`whoami`) |
+| 3 | Compound shapes (`&&` / `||` / `;` / pipes / redirects / subshells) are distinct patterns from their parts and fail when not explicitly allowlisted | `ORCHESTRATOR.md` "Bash command shape"; `PROMPT.md` "Bash command shape"; the live-run-doctrine commits | D1–D6, E1–E7, R19–R23 | confirmed — every stage of a compound (whether `&&` / `;` / pipe) must independently clear allow-or-safe-list AND the §2 path-locality gate. R19 (`echo hello \| env` Denied), R21 (`env \| echo hi` Denied), R23 (`echo hello \| cat /etc/issue` Denied) lay this out for pipes; D1–D6 covered the other separators. E5/E6 confirm subshells don't bypass. D3's earlier "Allowed" anomaly was the safe-list, not pipe-decomposition. |
 | 4 | The matcher decomposes `&&`-chained compounds and checks each half against allow + deny | `ORCHESTRATOR.md` step 6 implicitly; permission-denied worker doctrine | D1, D2, D3 | confirmed — D2 catches a deny on the right half; follow-up probe `echo a && env` is denied because `env` is denied alone. D3 was Allowed only because the right half is on the built-in safe list. |
-| 5 | A flag-bearing variant of an allowlisted command (e.g. `ls -la`) is matched by `Bash(<cmd>:*)` | various template entries assume this | B1, B2, B4 | partial — B1/B2 confirm flag args match; B3 falsifies for absolute paths outside the worktree (path-aware gate intercepts before the allow rule applies); B4–B7 not run (need session restart) |
+| 5 | A flag-bearing variant of an allowlisted command (e.g. `ls -la`) is matched by `Bash(<cmd>:*)` | various template entries assume this | B1, B2, B4 | partial — B1/B2 confirm flag args match; B3 falsifies for absolute paths outside the worktree (path-aware gate intercepts before the allow rule applies); B4–B7 still need Session B (see `.claude/worktrees/probe-pending/probes/RUNBOOK.md`) |
 | 6 | Worker subagents launched with `isolation: "worktree"` inherit the orchestrator's loaded `.claude/settings.local.json` (allowlist, deny, `dontAsk`, hook) | `ORCHESTRATOR.md` prereq #2; `handoff.md` "Resolved — hook propagation" | see `docs/subagent-permission-tests.md` instead — that catalog covers propagation | — |
-| 7 | Top-level tools (`Write`, `Read`, `Edit`, `Agent`, `Glob`, `Grep`) need explicit allow entries under `dontAsk`, else they auto-deny | settings template lists them; ADR 0004 names `Agent` as the load-bearing one | T1–T3 | not run — current session has all tools allowed; needs a session whose allow list omits them |
-| 8 | `dontAsk` causes any unallowlisted call to auto-deny as a tool error (no prompt) | `ORCHESTRATOR.md`; setup-ralph "worker permission mode" prose; ADR 0004 | covered by every catalog test — the procedure's enforcement-confirmation step is the canonical case | confirmed — every `cd .`, `env`, `rm`, `mkdir`, `claude --version`, `ls /tmp`, `ls /` produced "Denied by permissions" with no prompt; refinement: "unallowlisted" excludes the built-in safe-command list |
+| 7 | Top-level tools (`Write`, `Read`, `Edit`, `Agent`, `Glob`, `Grep`) need explicit allow entries under `dontAsk`, else they auto-deny | settings template lists them; ADR 0004 names `Agent` as the load-bearing one | T1–T5 | **falsified for most tools — split into per-tool behaviour** (see Findings §4). Gated: `Write` (T2), `Edit` (T5). Auto-permitted under `dontAsk`: `Read` (T3), `Agent` (T1), `NotebookEdit` (T4). Unobservable on this host: `Glob`, `Grep` (the v2.1.117+ Linux build drops them entirely). Practical impact: the template's `Read`/`Agent`/`Glob`/`Grep` entries are dead weight under `dontAsk`; `Write`/`Edit` are load-bearing. |
+| 8 | `dontAsk` causes any unallowlisted call to auto-deny as a tool error (no prompt) | `ORCHESTRATOR.md`; setup-ralph "worker permission mode" prose; ADR 0004 | covered by every catalog test — the procedure's enforcement-confirmation step is the canonical case | confirmed — every `cd .`, `env`, `rm`, `mkdir`, `claude --version`, `ls /tmp`, `ls /` produced "Denied by permissions" with no prompt; refinements: "unallowlisted" excludes (a) the built-in Bash safe-command list and (b) the auto-permitted top-level tools `Read`/`Agent`/`NotebookEdit` (see Findings §4). |
 | 9 | The `PreToolUse` path-guard hook fires for `Write` / `Edit` / `NotebookEdit` whose target resolves outside `realpath(cwd)` | `setup-ralph/templates/hook-path-guard.py`; ADR 0002 | H1–H4 | confirmed for H1–H3; H4 not run (needs `EXTRA_ALLOWED_ROOTS` edit + session restart) |
 | 10 | Glob expansion / quoting / env-var expansion in the command don't change which allow rule matches | implicit; no specific doctrine, but assumed by `Bash(echo:*)` matching `echo "hello world"` etc. | F1–F4 | falsified — F3 (`echo $HOME`) was Denied; the matcher rejects commands containing unexpanded `$VAR` references in the same shape that gets blocked for absolute external paths. Quoted strings (F1) and globs (F2) and escaped `\$` (F4) are unaffected. |
 | 11 | A command invoked by full path (e.g. `/usr/bin/git`) is "a different, unrecognised shape" and fails to match the allow rule for the bare command name | `PROMPT.md:93–94`; `ORCHESTRATOR.md:110` ("never run a command by full path") | N1–N6 | confirmed — but the rationale is sharper than the doctrine states. N5 shows the gate fires even for an absolute path **inside** the worktree, so it isn't the argument-path gate (§2) re-firing on the first token. It is a separate name-shape lookup: any `/` in the first token (`/abs/path` or `./relative`) makes the lookup miss against both the allow list and the safe list. |
@@ -165,9 +165,9 @@ calls).
 | ID | Allow | Command | Expected | Empirical |
 |---|---|---|---|---|
 | E1 | `Bash(echo:*)`, `Bash(tail:*)` | `echo hello \| tail -1` | Allowed | Allowed (2026-05-20) |
-| E2 | `Bash(echo:*)` only (no `tail`) | `echo hello \| tail -1` | Denied (allow rule missing) | not run — current session has `Bash(tail:*)` |
+| E2 | `Bash(echo:*)` only (no `tail`) | `echo hello \| tail -1` | Denied (allow rule missing) | **Allowed** (2026-05-22) — but not by pipe-bypass: `tail` is on the built-in safe list (see Findings §1, R5/R6), so every pipeline stage independently passes. Follow-up R19 (`echo hello \| env`) is Denied because `env` is neither allowed nor safe-listed, confirming pipes decompose like `&&` — every stage must clear matcher + §2. |
 | E3 | `Bash(echo:*)` | `echo hello > /tmp/x` | Allowed | **Denied** (2026-05-20) — `/tmp/x` is outside the worktree; same path-aware gate as B3 |
-| E4 | `Bash(echo:*)` | `echo hello 2>&1 \| tail -1` (no `tail` in allow) | Denied | not run — current session has `Bash(tail:*)` |
+| E4 | `Bash(echo:*)` | `echo hello 2>&1 \| tail -1` (no `tail` in allow) | Denied | **Allowed** (2026-05-22) — same as E2: `tail` is safe-listed. Stderr redirect is transparent to the matcher. |
 | E5 | `Bash(echo:*)` | `echo $(whoami)` (command substitution, `whoami` unallowlisted) | Denied | Denied (2026-05-20) — note: even though `whoami` is on the built-in safe list (D3), wrapping it in `$(...)` still denies the outer call. Command substitution surfaces the inner command to the matcher and the wrapped form is rejected as a distinct shape. |
 | E6 | `Bash(echo:*)` | `` echo `whoami` `` (backtick substitution) | Denied | Denied (2026-05-20) — same |
 | E7 | `Bash(pnpm typecheck)` (exact) | `pnpm typecheck 2>&1 \| tail -30` | Denied | not run — needs `Bash(pnpm typecheck)` in allow |
@@ -196,14 +196,20 @@ to block this.**
 
 | ID | Allow | Tool call | Expected | Empirical |
 |---|---|---|---|---|
-| T1 | `Agent` NOT in allow | `Agent` dispatch | Denied | not run — current session has `Agent` in allow |
-| T2 | `Write` NOT in allow | `Write` to a worktree-internal path | Denied | not run — current session has `Write` in allow |
-| T3 | `Read` NOT in allow | `Read` of any file | Denied | not run — current session has `Read` in allow |
+| T1 | `Agent` NOT in allow | `Agent` dispatch | Denied | **Allowed** (2026-05-22) — `Agent` is auto-permitted under `dontAsk`; allow-list entry is not required. See Findings §4. |
+| T2 | `Write` NOT in allow | `Write` to a worktree-internal path | Denied | Denied (2026-05-22) — generic "don't ask mode" denial; matcher rejects upstream of the path-guard hook. |
+| T3 | `Read` NOT in allow | `Read` of any file | Denied | **Allowed** (2026-05-22) — `Read` is auto-permitted under `dontAsk`. See Findings §4. |
+| T4 | `NotebookEdit` NOT in allow | `NotebookEdit` of any path | Denied | **Allowed** (2026-05-22, R27) — `NotebookEdit` is auto-permitted under `dontAsk`; the matcher passes and the call reaches the path-guard hook. See Findings §4. |
+| T5 | `Edit` NOT in allow | `Edit` of any file | Denied | Denied (2026-05-22, R26) — same generic "don't ask mode" denial as `Write`. Matcher rejects upstream of the hook, so the hook never fires for unallowed Edits. |
 
-T1–T3 probe whether the bare tool-name entries in the template
+T1–T5 probe whether the bare tool-name entries in the template
 (`Write`, `Read`, `Edit`, `Glob`, `Grep`, `Agent`) are actually
 necessary under `dontAsk`, or whether top-level tools are always
-permitted regardless of the allow list.
+permitted regardless of the allow list. Result (Findings §4): the
+split is **mutating-text vs everything else** — `Write` and `Edit`
+require explicit allow; `Read`, `NotebookEdit`, `Agent` are
+auto-permitted. `Glob` and `Grep` were not exposed in the Linux build
+used here (v2.1.117+ drops them in favour of Bash `bfs`/`ugrep`).
 
 ### Group N — command-name shape (path-bearing first token)
 
@@ -285,21 +291,53 @@ warrant doctrine patches.
 ### 1. Built-in safe-command list (bypasses the allow list)
 
 A set of read-only commands run successfully under `dontAsk` even when
-they have no allow-rule. Confirmed on 2026-05-20 in this session:
+they have no allow-rule. The 2026-05-22 Session A run (allow = only
+`Bash(echo:*)`) expanded the catalog significantly. Confirmed members:
 
-- Allowed without a rule: `whoami`, `pwd`, `id`, `uname`, `date`,
-  `date +%Y`.
-- Denied without a rule (same session): `env`, `mkdir`, `rm`,
-  `claude --version`.
+- **Identity / environment:** `whoami`, `pwd`, `id`, `uname`, `date`,
+  `date +%Y`, `hostname`, `groups`, `uptime`, `ps`, `ps aux`, `free`,
+  `df`, `du`.
+- **Path / metadata (no content read):** `test`, `realpath`, `readlink`,
+  `dirname`, `basename`.
+- **Content-reading (subject to §2):** `cat`, `head`, `tail`, `wc`,
+  `grep` (`ugrep` on this host), `find` (`bfs` on this host), `stat`,
+  `ls`. These run iff every positional path arg is inside `realpath(cwd)`
+  — the §2 gate fires on outside-cwd args before the safe-list check
+  has any effect.
+- **Trivial output / arithmetic:** `printf`, `true`, `false`, `seq`,
+  `expr`.
+- **Tool location:** `which`, `type`.
 
-So "allow list" is `template allow ∪ Claude-Code's built-in safe list`.
-The built-in list is not documented; treat it as opaque and re-probe
-after version bumps.
+Confirmed **denied** without a rule:
+
+- **Environment leaks:** `env`, `printenv`, `printenv PATH`.
+- **Mutating filesystem:** `mkdir`, `rm`.
+- **Session metadata:** `tty`, `who`, `w`, `hostnamectl`,
+  `claude --version`, `command -v`, `hash`.
+- **Pipeline sources:** `yes` (which is why `yes | head -1` is Denied
+  even though `head` is safe-listed — every stage must clear, see
+  Findings §3 and assumption row #3).
+
+So "allow list" is `template allow ∪ Claude-Code's built-in safe list`,
+and the safe list is wider than initially thought — most common
+read-only Unix utilities (~25 commands) are on it. The built-in list is
+not documented; treat it as opaque and re-probe after version bumps.
+Aliases matter: `grep`→`ugrep` and `find`→`bfs` on the Linux build used
+here; flag semantics differ from GNU coreutils.
 
 Doctrine impact: any reasoning that says "if I don't allow X, the
-worker can't run X" is wrong for the safe-list commands. In particular,
-`Bash(date +%s)` in `setup-ralph/templates/settings.template.json` is
-dead weight — `date` runs regardless.
+worker can't run X" is wrong for the safe-list commands. In particular:
+
+- `Bash(date +%s)` and `Bash(test:*)` in
+  `setup-ralph/templates/settings.template.json` are dead weight — both
+  commands run regardless.
+- `Bash(cat:*)`, `Bash(head:*)`, `Bash(tail:*)`, `Bash(grep:*)`,
+  `Bash(find:*)`, `Bash(ls:*)` are also dead weight *for any path
+  inside the worktree* — the safe list covers them. They ARE still
+  load-bearing as "explicit permission to use this command across the
+  full argument shape the worker constructs" — but per §2 even the
+  explicit `Bash(<cmd>:*)` rule cannot reach outside `realpath(cwd)`,
+  so the template entries don't unlock outside-cwd access either.
 
 ### 2. Argument path-locality gate (stricter than `:*` suggests)
 
@@ -332,14 +370,24 @@ just sibling paths — and on any token starting with `$` that the
 shell would expand. Quoting alone does not suppress (`echo "$HOME"`
 would presumably still be Denied, untested), but escaping the `$` does.
 
-**`test` is the one exception observed.** It can stat any absolute
-path. The pattern that fits: the gate applies to commands that read
-or write file *content*; `test` only reads file *metadata*, so it
-slips through. This is consistent with what a security-aware matcher
-would do, but it means a worker can confirm the existence and
-permissions of arbitrary paths even under the strictest allowlist.
+**`test` is not the only exception** — the 2026-05-22 re-probe shows
+the gate is content-shape-aware, not command-name-specific.
+Path-manipulation commands that read only the path *string* (not the
+file's contents) bypass §2: `realpath /etc/issue`, `readlink /etc/issue`,
+`dirname /etc/issue`, `basename /etc/issue` all returned data. So the
+pattern is: §2 applies to commands the matcher classifies as
+content-reading or content-writing; metadata / string-manipulation
+commands slip through. A worker under the strictest allowlist can still
+enumerate `realpath`, `dirname`, etc. on arbitrary absolute paths.
 Doctrine should note this if any guarantee is being made about
 "worker can't see outside its worktree."
+
+**§2 fires per pipeline stage**, not just on the leading command. The
+2026-05-22 R23 probe — `echo hello | cat /etc/issue` — was Denied,
+because `cat`'s argument `/etc/issue` resolves outside cwd. The
+matcher decomposes the pipeline and applies §2 to every stage's
+arguments independently. This is the same per-stage rule confirmed for
+assumption #3 (pipes / `&&` / `;` all decompose).
 
 Doctrine impact: the "Bash command shape" passages in `ORCHESTRATOR.md`
 and `PROMPT.md` describe a coarse prefix matcher. The real matcher is
@@ -383,7 +431,50 @@ distinct mechanisms). Doctrine should distinguish:
 
 These are independent. A worker can hit one without the other.
 
-### 4. Command substitution stays denied (good news for the doctrine)
+### 4. Top-level tools are auto-permitted under `dontAsk` except `Write` / `Edit`
+
+The 2026-05-22 Session A run probed the top-level tools with none of
+them in the allow list (only `Bash(echo:*)`). Outcome:
+
+| Tool | Under `dontAsk` without allow | Evidence |
+|---|---|---|
+| `Write` | **Denied** (allow rule missing) | T2: probe-t2.txt inside worktree, generic "don't ask mode" denial |
+| `Edit` | **Denied** (allow rule missing) | R26: small Edit on README.md, same denial template |
+| `NotebookEdit` | **Allowed** by matcher | R27: matcher passes; call reaches NotebookEdit's own "read-before-write" precondition error |
+| `Read` | **Allowed** | T3: CONTEXT.md returned in full |
+| `Agent` | **Allowed** | T1: subagent dispatched and replied |
+| `Glob` | Not observable | R24: not exposed in this Linux build (v2.1.117+ drops it for Bash `bfs`) |
+| `Grep` | Not observable | R25: same — dropped for Bash `ugrep` |
+
+The split is **mutating-text vs everything else**: `Write` and `Edit`
+require explicit allow entries; `NotebookEdit`, `Read`, `Agent` are
+auto-permitted. The denial template for `Write` / `Edit` is the same
+generic "don't ask mode" string used for unallowlisted `Bash` calls,
+suggesting all three are gated by the same matcher pass.
+
+Doctrine impact:
+
+- The template entries `Read`, `Agent` (and `Glob`, `Grep` on hosts
+  that have them) are **not load-bearing** for enforcement. They are
+  harmless and explicit, but a config that omits them gates exactly
+  the same set of calls. `Write` and `Edit` ARE load-bearing —
+  removing them disables the worker's primary tooling.
+- **`NotebookEdit` is auto-permitted** and represents a write surface
+  that a restrictive `dontAsk` config does NOT cover via the matcher.
+  The orchestrate-ralph template's path-guard hook covers
+  `NotebookEdit` (matcher = `Write|Edit|NotebookEdit`), so the loop is
+  safe — but any reader copying the template piecemeal and omitting
+  the hook would leak a write vector. Flag this when documenting
+  `dontAsk` to external readers.
+- **The path-guard hook is masked by the matcher for `Write` / `Edit`
+  when those tools aren't in the allow list.** The matcher denies
+  upstream; the hook never sees the call. The hook only earns its
+  keep in configs where `Write` / `Edit` ARE allowed (the worker
+  config). It is not generic `dontAsk` hardening — it is
+  specifically the worker-enforcement complement to a matcher-allowed
+  Write/Edit surface.
+
+### 5. Command substitution stays denied (good news for the doctrine)
 
 E5/E6 confirmed: `$(...)` and backtick wrappers do not bypass the
 matcher. `echo $(whoami)` was Denied even though both `echo` (via the
