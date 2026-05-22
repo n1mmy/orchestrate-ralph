@@ -418,16 +418,18 @@ half because `Bash(cd:*)` is in the standard template's deny block.
 
 ### Group E — pipes, redirects, subshells (assumption #3)
 
-Target: `Bash(rmdir:*)`, with `env` as the discriminating non-matching
-pipeline stage. Subshell probes test whether `$(...)` / backtick
-wrappers count as distinct shapes — load-bearing for the "worker
-can't bypass via subshell" property. E3's redirect target is `/etc/`,
-which is outside cwd (probing §2 on the redirect target) and also
-unwritable as a safety net.
+Target: `Bash(rmdir:*)` for the matching half, with `tail` (safe-listed)
+as the matching second stage when both halves should clear, and `env`
+(not safe-listed) as the discriminating non-matching stage when the
+pipeline should deny. Subshell probes test whether `$(...)` / backtick
+wrappers count as distinct shapes — load-bearing for the "worker can't
+bypass via subshell" property. E3's redirect target is `/etc/`, which
+is outside cwd (probing §2 on the redirect target) and also unwritable
+as a safety net.
 
 | ID | Allow | Command | Expected | Empirical |
 |---|---|---|---|---|
-| E1 | `Bash(rmdir:*)`, `Bash(env)` | `rmdir probe-e1-dne \| env` | Allowed (both stages clear) | |
+| E1 | `Bash(rmdir:*)` | `rmdir probe-e1-dne \| tail -1` (`tail` safe-listed) | Allowed (rmdir via the rule; tail via the safe list — both stages clear) | |
 | E2 | `Bash(rmdir:*)` only (no `Bash(env)`) | `rmdir probe-e2-dne \| env` | Denied (env stage fails allow check) | |
 | E3 | `Bash(rmdir:*)` | `rmdir probe-e3-dne > /etc/probe-e3-out` | Denied by §2 on the redirect target | |
 | E4 | `Bash(rmdir:*)` only (no `Bash(env)`) | `rmdir probe-e4-dne 2>&1 \| env` | Denied (stderr redirect doesn't disguise the env stage) | |
