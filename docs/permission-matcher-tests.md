@@ -54,8 +54,8 @@ and minimal-allowlist probe configurations, see
    loaded, edit `.claude/settings.local.json`, exit claude, re-launch,
    confirm enforcement again, then run the test. Settings are read at
    startup only. The "Settings configurations" subsection below groups
-   the catalog into five compatible configs (S1–S5) so the full run
-   needs no more than five swaps.
+   the catalog into three compatible configs (S1–S3) so the full run
+   needs no more than three swaps.
 
 ### Outcome categories
 
@@ -82,52 +82,60 @@ Running the full catalog requires placing a few distinct
 `.claude/settings.local.json` shapes and restarting claude between
 each — settings are read at session start only, so a mid-session
 edit doesn't take effect. The configurations below cover every probe
-group in **five placements**, picked so each config can hold a
+group in **three placements**, picked so each config can hold a
 large block of mutually-compatible rules without making any probe's
 Allowed outcome co-attributable across rules. The base of every
 config is the standard template's deny block + path-guard hook
 (with `EXTRA_ALLOWED_ROOTS = ["/tmp/whitelisted"]` so Group H's H4
 variant runs alongside H1–H3 without a hook-file swap).
 
-**S1 — matcher base (`:*` variants)** covers Groups A, B, D, E, F,
-N, H, Bp, Cs, plus T1/T3/T4 and M1/M2.
+Where two probe groups would otherwise conflict (e.g. an exact-rule
+test and a `:*`-rule test for the same command), the catalog uses
+distinct **fictional command names** (`xprobe one`, `xprobe two`,
+`xprobe three`, `yprobe`, `zprobe`, `zprobeext`) so multiple rule
+shapes can coexist without overlap. Fictional commands resolve to
+"command not found" after the matcher decides, so the matcher
+attribution is what's being observed.
 
-Allow: `Bash(rmdir:*)`, `Bash(xprobe one:*)`, `Bash(echo:*)`,
-`Bash(ls:*)`, `Bash(git:*)`, top-level `Write`, top-level `Edit`.
+**S1 — broad matcher base** covers Groups A, B, C5–C9, Cr1–Cr9, D,
+E, F, N, H, Bp, Cs, plus T1/T3/T4, M1/M2, M4.
 
-**S2 — exact rules (no `:*`)** covers Cr1–Cr9 and C5–C9.
+Allow:
+- `Bash(rmdir:*)` — single-word `:*` (A, B, D, E, F)
+- `Bash(xprobe one:*)` — multi-word `:*` (Bp, E7–E12)
+- `Bash(xprobe two)` exact — multi-word exact (C5–C9)
+- `Bash(yprobe)` exact — single-word exact (Cr)
+- `Bash(zprobe:*)` — word-boundary test against `zprobeext` (M4)
+- `Bash(echo:*)`, `Bash(ls:*)`, `Bash(git:*)` — Group N first-token
+  shape probes
+- top-level `Write`, top-level `Edit` — Group H
 
-Allow: `Bash(rmdir)`, `Bash(xprobe one)`, top-level `Write`,
-top-level `Edit`. The bare-name rules behave differently from their
-`:*` counterparts (Cr and C5–C9 prove exact ≠ `:*`), so the `:*`
-rules must be **absent** here.
+The fictional name discipline prevents conflicts: `Bash(yprobe)`
+exact admits only `yprobe` bare and stays orthogonal to `Bash(rmdir:*)`;
+`Bash(xprobe two)` exact admits only `xprobe two` bare and stays
+orthogonal to `Bash(xprobe one:*)`; `Bash(zprobe:*)` would admit
+`zprobe <anything>` but the M4 probe targets `zprobeext`, which the
+matcher rejects via word-boundary tokenisation if assumption #13 holds.
 
-**S3 — minimal echo-only** covers T1–T5, M0, and Group Bg.
+**S2 — minimal echo-only** covers T1–T5, Group Bg.
 
 Allow: `Bash(echo:*)` only. No `Write`, no `Edit` (so T2 and T5
 genuinely probe matcher gating instead of finding the rule in
-allow), no `Bash(rmdir:*)` (so M0's "rmdir not on safe list"
-precondition holds), no `Bash(git:*)` (so Bg can enumerate the
-git safe list without confounding rules in scope).
+allow), no `Bash(git:*)` (so Bg can enumerate the git safe list
+without confounding rules in scope). Group Bg's catalog rows already
+record one Session's enumeration; future re-runs swap to this config.
 
-**S4 — `Bash(rm:*)` only** covers M4.
-
-Allow: `Bash(rm:*)` only. Distinct from S3 because M4 tests
-word-boundary tokenisation of `Bash(rm:*)` against `rmdir`, and the
-short-form rule must be present for the probe to discriminate
-"word-boundary tokenisation" from "pure literal-prefix matching."
-
-**S5 — `Bash(git status:*)` only** covers M5 and Bm1–Bm17.
+**S3 — `Bash(git status:*)` only** covers M5 and Bm1–Bm17.
 
 Allow: `Bash(git status:*)` only. The template deny block stays so
-Bm17's `Bash(git push:*)` deny-rule control fires.
+Bm17's `Bash(git push:*)` deny-rule control fires. Bm specifically
+uses real `git status` because its load-bearing findings are about
+the git safe list interacting with a multi-word `:*` rule; Bp covers
+the same matcher mechanism with a fictional target.
 
-**Suggested swap order**: S1 (large majority of rows) → S2 → S3 → S4
-→ S5. Each transition is exit + edit `.claude/settings.local.json`
-+ re-launch + confirm enforcement. The H4-variant `EXTRA_ALLOWED_ROOTS`
-boundary lives in the hook file, not in settings, so a hook-file
-edit doesn't strictly require restart; but for predictability the
-operator may restart anyway.
+**Suggested swap order**: S1 (largest block) → S2 → S3. Each
+transition is exit + edit `.claude/settings.local.json` + re-launch
++ confirm enforcement.
 
 The Allow column on each catalog row still names the load-bearing
 rule the probe depends on, not the full config in scope. That
@@ -145,7 +153,7 @@ next group needs a different config.
 ```text
 You're filling in the Empirical column of the catalog in
 docs/permission-matcher-tests.md. The "Settings configurations" section
-defines five named configs (S1–S5) that cover all probe groups.
+defines three named configs (S1, S2, S3) that cover all probe groups.
 You're under one of them now.
 
 For each probe row in the group(s) the current config covers:
@@ -154,7 +162,7 @@ For each probe row in the group(s) the current config covers:
    error "Denied by permissions" with no prompt. A prompt means
    STOP; the session isn't enforced and outcomes are meaningless.
 2. Sanity-check the row's Allow column against the current config.
-   If the row needs a rule that isn't in scope (per the S1–S5
+   If the row needs a rule that isn't in scope (per the S1–S3
    definitions), STOP and tell me which config you need next.
 3. Run the probe's Command exactly as written. Classify the result
    into Allowed / Denied (allow rule missing) / Denied (deny rule) /
@@ -174,7 +182,7 @@ falsification.
 
 After finishing all rows the current config covers, summarise what
 ran, what diverged, and pause so I can swap settings + restart you
-under the next config in the suggested order (S1 → S2 → S3 → S4 → S5).
+under the next config in the suggested order (S1 → S2 → S3).
 ```
 
 The operator's job: launch the probe session under the right
@@ -284,13 +292,16 @@ matched", pick a target neither safe list appears to touch:
 - **`env`** — denied without a rule; useful as the discriminating
   stage in a pipe / `&&` compound probe.
 - **`rmdir`** — denied without a rule. Side-effect free in `--help`
-  and `missing operand` forms.
-- **`xprobe one` (or any fictional command pair)** — bash errors
-  `command not found` after the matcher decides. Multi-word shape
-  suitable for testing `Bash(<x> <y>:*)` and `Bash(<x> <y>)` rules.
-  Doesn't depend on any installed tool, so probes stay reproducible
-  across hosts and tool-version drift can't change the matcher
-  attribution.
+  and `missing operand` forms; on the §2 path-typed list.
+- **Fictional command names** (e.g. `xprobe one`, `xprobe two`,
+  `xprobe three`, `yprobe`, `zprobe`, `zprobeext`) — bash errors
+  `command not found` after the matcher decides. Doesn't depend on
+  any installed tool, so probes stay reproducible across hosts and
+  tool-version drift can't change the matcher attribution. The
+  catalog uses **multiple distinct fictional names** so the same
+  config can hold a `Bash(<a>:*)` rule and a `Bash(<b>)` exact rule
+  without overlap — picking unique names is what lets exact and
+  `:*` probes coexist under one settings config.
 
 Conversely, when a probe's load-bearing outcome is "Denied because
 the rule didn't reach", a safe-listed target obscures the result:
@@ -309,7 +320,7 @@ assumption; the doc is most useful once each row has a result.
 | # | Assumption | Where it lives | Test(s) | Status |
 |---|---|---|---|---|
 | 1 | `:*` after a command name allowlists "any suffix" | `setup-ralph/SKILL.md` step 3; common template entries like `Bash(git:*)` | A1–A5 | pending — Group A reframed to `Bash(rmdir:*)`, all probes unrun. Multi-word `:*` semantics confirmed independently via Group Bm: Bm9–Bm11 (word-boundary on both first-token and trailing edges) and Bm16 (position-locked at argv 0/1). Bounded by §2 path-locality: under `:*`, absolute outside-cwd paths still deny for commands on the §2 list (Baseline). B3 will re-probe this boundary for `rmdir` under an explicit allow rule. |
-| 2 | A bare command name with no `:*` is an exact match | `Bash(date +%s)` in the template uses this shape | Cr1–Cr9 (single-word `rmdir`); C5–C9 (multi-word `xprobe one`) | single-word confirmed (2026-05-22) — Cr1 Allowed (bare matches the exact rule); Cr2–Cr9 all Denied (any suffix — flag, positional, empty quoted arg, extra whitespace — fails the exact match). Multi-word pending — C5–C9 reframed to the fictional `Bash(xprobe one)`, all probes unrun. Both targets non-safe-listed per Baseline. |
+| 2 | A bare command name with no `:*` is an exact match | `Bash(date +%s)` in the template uses this shape | Cr1–Cr9 (single-word `yprobe`); C5–C9 (multi-word `xprobe two`) | pending — both groups reframed to fictional non-safe-listed targets, all probes unrun. Single-word side previously confirmed via `Bash(rmdir)` (Cr1 Allowed, Cr2–Cr9 Denied across flag/positional/empty/whitespace suffixes); multi-word side previously confirmed via `Bash(pnpm typecheck)` and then `Bash(xprobe one)` exact. Switch to `yprobe` and `xprobe two` (distinct fictional names) so both exact rules can coexist with `Bash(rmdir:*)` and `Bash(xprobe one:*)` in the same config without rule shadowing — see Settings configurations §S1. |
 | 3 | Compound shapes (`&&` / `||` / `;` / pipes / redirects / subshells) are distinct patterns from their parts and fail when not explicitly allowlisted | `ORCHESTRATOR.md` "Bash command shape"; `PROMPT.md` "Bash command shape" | D1–D6 (single-word `rmdir`); E1–E12 (mixed) | pending re-probe across the rebased catalog. Single-word leading stage covered by Group D (rmdir + env) and Group E E1–E6 (rmdir + env + subshell). Multi-word leading stage covered by Group E E7–E12 (xprobe one + env / rmdir / cat). All probes unrun. The principle holds in Cross-cutting Finding §3 (per-stage gating across allow / safe list / §2) and §5 (subshell rejection); the catalog rebase closes the loop with non-safe-listed and target-agnostic probes. |
 | 4 | The matcher decomposes `&&`-chained compounds and checks each half against allow + deny | `ORCHESTRATOR.md` step 6 implicitly; permission-denied worker doctrine | D2 (deny on right), E10 (allow-missing on right) | pending — D2 (rmdir + cd deny rule) probes the deny-rule case on the right half; E10 (xprobe one + env, no env allow rule) probes the allow-missing case. Either suffices to falsify "matcher treats `&&` as one shape"; together they cover both denial mechanisms. |
 | 5 | A flag-bearing variant of an allowlisted command (e.g. `rmdir --help`) is matched by `Bash(<cmd>:*)` | various template entries assume this | B1, B2, B4; Bm1–Bm17 | confirmed at the multi-word level via Bm1–Bm6 (`:*` accepts flags, `=`-suffixed flags, multiple flags). Bm9–Bm11 confirm strict word-boundary on both sides; Bm14 confirms §2 is command-specific; Bm16 confirms position-locking at argv 0/1. Single-word side reframed to `Bash(rmdir:*)` (Group B), all probes unrun — pending re-probe to close the loop for short-command `:*` rules. |
@@ -320,7 +331,7 @@ assumption; the doc is most useful once each row has a result.
 | 10 | Glob expansion / quoting / env-var expansion in the command don't change which allow rule matches | implicit; no specific doctrine, but assumed by `Bash(<cmd>:*)` matching `<cmd> "hello world"` etc. | F1–F4 | pending — Group F reframed to `Bash(rmdir:*)` with all probes unrun. The `$VAR`-shape rejection is the load-bearing falsification: previously observed with `echo $HOME` Denied, preserved as principle in Findings §2 (gate fires on unexpanded `$VAR` tokens). New F3 uses `$PWD` (expands inside cwd) so the Denied attribution will isolate `$VAR` from §2's outside-cwd path rejection. F4 escapes the `$` to test that the shape rejection lifts. |
 | 11 | A command invoked by full path (e.g. `/usr/bin/git`) is "a different, unrecognised shape" and fails to match the allow rule for the bare command name | `PROMPT.md:93–94`; `ORCHESTRATOR.md:110` ("never run a command by full path") | N1–N6 | confirmed — but the rationale is sharper than the doctrine states. N5 shows the gate fires even for an absolute path **inside** the worktree, so it isn't the argument-path gate (§2) re-firing on the first token. It is a separate name-shape lookup: any `/` in the first token (`/abs/path` or `./relative`) makes the lookup miss against both the allow list and the safe list. |
 | 12 | Multi-word `:*` prefixes in allow / deny rules (`Bash(git push:*)`, `Bash(git status:*)`) match exactly the multi-word prefix plus any suffix, and do not match unrelated subcommands | `setup-ralph/templates/settings.template.json` deny block (`Bash(git push:*)`, `Bash(git fetch:*)`, etc.); template-mode prose | M1, M2, M5 | confirmed — multi-word `:*` matches the prefix plus any suffix and does not over-match unrelated subcommands, on both sides. M1/M2 cover the **deny** side (`Bash(git push:*)` denied `git push --help`; did not over-match `git status`). M5 covers the **allow** side (`Bash(git status:*)` allowed `git status --short` with no `Bash(git:*)` present to confound). |
-| 13 | `Bash(<cmd>:*)` matches strictly the first-token command name, not arbitrary first-token text starting with `<cmd>` (i.e., the matcher tokenises on word boundary, so `Bash(rm:*)` does not match `rmdir`) | Implicit everywhere a short command is allowlisted via `:*` (`Bash(rm:*)` would be problematic if it over-matched `rmdir`); also a security-relevant property of every `Bash(<short>:*)` rule | M4 | confirmed via M4 — word-boundary tokenisation, not pure literal-prefix matching. With `Bash(rm:*)` as the only allow rule, `rmdir --help` was Denied. `Bash(<short>:*)` rules are scoped to the exact command name as intended. |
+| 13 | `Bash(<cmd>:*)` matches strictly the first-token command name, not arbitrary first-token text starting with `<cmd>` (i.e., the matcher tokenises on word boundary, so `Bash(rm:*)` does not match `rmdir`) | Implicit everywhere a short command is allowlisted via `:*` (`Bash(rm:*)` would be problematic if it over-matched `rmdir`); also a security-relevant property of every `Bash(<short>:*)` rule | M4 | previously confirmed (2026-05-20) with `Bash(rm:*)` + `rmdir --help` Denied. M4 is now rebased onto the fictional pair `Bash(zprobe:*)` + `zprobeext --help` so it fits into the consolidated S1 config without conflicting with `Bash(rmdir:*)`; same matcher principle, target-agnostic. Probe is unrun under the new shape. |
 
 ## Test catalog
 
@@ -380,20 +391,20 @@ on a non-empty directory.
 
 | ID | Allow | Command | Expected | Empirical |
 |---|---|---|---|---|
-| C5 | `Bash(xprobe one)` | `xprobe one` (bare match) | Allowed (matcher passes; bash then errors "command not found") | |
-| C6 | `Bash(xprobe one)` | `xprobe one --watch` (flag suffix) | Denied (exact match doesn't accept suffix) | |
-| C7 | `Bash(xprobe one)` | `xprobe one src` (positional suffix) | Denied | |
-| C8 | `Bash(xprobe one)` | `xprobe` (bare leader only, no subcommand) | Denied | |
-| C9 | `Bash(xprobe one)` | `xprobe two` (different subcommand) | Denied | |
-| Cr1 | `Bash(rmdir)` | `rmdir` | Allowed | Allowed (2026-05-22) — bare token matches the exact rule; underlying `rmdir` errored `missing operand` but that's after the matcher |
-| Cr2 | `Bash(rmdir)` | `rmdir foo` | Denied (allow rule missing) | Denied (2026-05-22) — exact-match does NOT accept any suffix token |
-| Cr3 | `Bash(rmdir)` | `rmdir ""` (empty quoted arg) | Denied | Denied (2026-05-22) — empty quoted arg still counts as a suffix |
-| Cr4 | `Bash(rmdir)` | `rmdir  foo` (two spaces) | Denied | Denied (2026-05-22) — extra whitespace is not normalised; the second space + foo is a suffix |
-| Cr5 | `Bash(rmdir)` | `rmdir --help` | Denied | Denied (2026-05-22) — a flag arg is still a suffix |
-| Cr6 | `Bash(rmdir)` | `rmdir -p foo` | Denied | Denied (2026-05-22) |
-| Cr7 | `Bash(rmdir)` | `rmdir foo bar` | Denied | Denied (2026-05-22) |
-| Cr8 | `Bash(rmdir)` | `rmdir /tmp/probe-c8` (outside-cwd path) | Denied | Denied (allow rule missing) (2026-05-22) — the exact rule doesn't match this shape; §2 never gets a turn. Probing §2 for `rmdir` requires `Bash(rmdir:*)` as the allow shape (deferred). |
-| Cr9 | `Bash(rmdir)` | `rmdir probe-c9` (cwd-relative) | Denied | Denied (2026-05-22) — same; allow rule doesn't match |
+| C5 | `Bash(xprobe two)` | `xprobe two` (bare match) | Allowed (matcher passes; bash then errors "command not found") | |
+| C6 | `Bash(xprobe two)` | `xprobe two --watch` (flag suffix) | Denied (exact match doesn't accept suffix) | |
+| C7 | `Bash(xprobe two)` | `xprobe two src` (positional suffix) | Denied | |
+| C8 | `Bash(xprobe two)` | `xprobe` (bare leader only, no subcommand) | Denied | |
+| C9 | `Bash(xprobe two)` | `xprobe three` (different subcommand; no rule for `xprobe three` in scope) | Denied | |
+| Cr1 | `Bash(yprobe)` | `yprobe` (bare) | Allowed (matcher passes; bash errors "command not found") | |
+| Cr2 | `Bash(yprobe)` | `yprobe foo` | Denied (allow rule missing — exact does NOT accept any suffix token) | |
+| Cr3 | `Bash(yprobe)` | `yprobe ""` (empty quoted arg) | Denied | |
+| Cr4 | `Bash(yprobe)` | `yprobe  foo` (two spaces) | Denied (extra whitespace is not normalised; the second space + foo is a suffix) | |
+| Cr5 | `Bash(yprobe)` | `yprobe --help` | Denied (a flag arg is still a suffix) | |
+| Cr6 | `Bash(yprobe)` | `yprobe -p foo` | Denied | |
+| Cr7 | `Bash(yprobe)` | `yprobe foo bar` | Denied | |
+| Cr8 | `Bash(yprobe)` | `yprobe /tmp/probe-cr8` (outside-cwd path) | Denied (allow rule missing — exact doesn't match; §2 wouldn't fire either since `yprobe` isn't on the §2 list, but the allow check is dispositive first) | |
+| Cr9 | `Bash(yprobe)` | `yprobe probe-cr9` (cwd-relative) | Denied | |
 | Cs1 | `Bash(rmdir)` (irrelevant to echo) | `echo` (bare) | unknown — depends on safe list | **Allowed** (2026-05-22) — no `Bash(echo*)` rule present; `echo` is on the Bash safe list (see Baseline). |
 | Cs2 | same | `echo hello` | depends | Allowed (2026-05-22) — with-arg form also safe-listed |
 | Cs3 | same | `printf` (bare) | depends | Allowed (2026-05-22) — bare printf safe-listed (the Session A `printf "hi\n"` probe only confirmed the with-arg shape; this fills the gap) |
@@ -435,12 +446,12 @@ as a safety net.
 | E4 | `Bash(rmdir:*)` only (no `Bash(env)`) | `rmdir probe-e4-dne 2>&1 \| env` | Denied (stderr redirect doesn't disguise the env stage) | |
 | E5 | `Bash(rmdir:*)` | `rmdir $(echo probe-e5)` (subshell substitution) | Denied (subshell shape rejected) | |
 | E6 | `Bash(rmdir:*)` | `` rmdir `echo probe-e6` `` (backtick substitution) | Denied (backtick shape rejected) | |
-| E7 | `Bash(xprobe one)` (exact) | `xprobe one 2>&1 \| tail -1` (multi-word + safe-listed second stage) | Allowed (both stages clear; tail via safe list) | |
-| E8 | `Bash(xprobe one)` only (no `Bash(env)`) | `xprobe one \| env` (multi-word + non-safe-listed second stage) | Denied (env stage fails allow check; pipe decomposes per-stage even with multi-word leader) | |
-| E9 | `Bash(xprobe one)` only | `xprobe one 2>&1 \| env` (stderr redirect doesn't disguise) | Denied | |
-| E10 | `Bash(xprobe one)` only | `xprobe one && env` (`&&` decomposes with multi-word leader) | Denied | |
-| E11 | `Bash(xprobe one)`, `Bash(rmdir:*)` | `xprobe one && rmdir probe-e11-dne` (both halves match different rules) | Allowed | |
-| E12 | `Bash(xprobe one)` | `xprobe one \| cat /tmp/probe-e12` (§2 fires on downstream cat) | Denied (§2 on downstream stage despite leading-stage match) | |
+| E7 | `Bash(xprobe one:*)` | `xprobe one 2>&1 \| tail -1` (multi-word + safe-listed second stage) | Allowed (both stages clear; tail via safe list) | |
+| E8 | `Bash(xprobe one:*)` only (no `Bash(env)`) | `xprobe one \| env` (multi-word + non-safe-listed second stage) | Denied (env stage fails allow check; pipe decomposes per-stage even with multi-word leader) | |
+| E9 | `Bash(xprobe one:*)` only | `xprobe one 2>&1 \| env` (stderr redirect doesn't disguise) | Denied | |
+| E10 | `Bash(xprobe one:*)` only | `xprobe one && env` (`&&` decomposes with multi-word leader) | Denied | |
+| E11 | `Bash(xprobe one:*)`, `Bash(rmdir:*)` | `xprobe one && rmdir probe-e11-dne` (both halves match different rules) | Allowed | |
+| E12 | `Bash(xprobe one:*)` | `xprobe one \| cat /tmp/probe-e12` (§2 fires on downstream cat) | Denied (§2 on downstream stage despite leading-stage match) | |
 
 E2 is the discriminating probe. If pipes were intra-command (the
 whole pipeline treated as one command, prefix-matched), E2 would be
@@ -555,20 +566,20 @@ on a word boundary (so `Bash(rm:*)` does not match `rmdir`) or treats
 allow rule over-broad).
 
 **All probes are deliberately side-effect free.** `git push --help` is
-intercepted by git's `--help` handler and execs the man page — no network
-contact, no on-disk change. `git status` and `git status --short` are
-read-only. `rmdir --help` prints help and exits without touching a
-directory. If you add probes to this group, hold to the same standard:
-**no probe may have real-world side effects even in the failure mode
-where the matcher unexpectedly Allows.**
+intercepted by git's `--help` handler and execs the man page — no
+network contact, no on-disk change. `git status` and `git status
+--short` are read-only. `zprobeext` is fictional and bash errors
+"command not found" after the matcher decides. If you add probes to
+this group, hold to the same standard: **no probe may have real-world
+side effects even in the failure mode where the matcher unexpectedly
+Allows.**
 
 | ID | Allow / Deny | Command | Expected | Empirical |
 |---|---|---|---|---|
-| M0 | (no allow rule for `rmdir`) | `rmdir --help` | Denied | Denied (2026-05-20) — precondition for M4 holds; `rmdir` is not on the safe list. |
 | M1 | deny `Bash(git push:*)`, allow `Bash(git:*)` | `git push --help` | Denied | Denied (2026-05-20) — multi-word deny `Bash(git push:*)` matches a `git push <suffix>` shape. |
 | M2 | same | `git status` | Allowed | Allowed (2026-05-20) — multi-word deny does not over-match unrelated `git` subcommands. |
-| M4 | allow `Bash(rm:*)` only (no other rule for `rmdir`) | `rmdir --help` | Denied if word-boundary tokenisation; Allowed if pure literal prefix matching | Denied (allow rule missing) (2026-05-20) — word-boundary tokenisation confirmed; `Bash(rm:*)` does not over-match `rmdir`. With M0 having established `rmdir` is not on the safe list, the only Allow path would have been pure-prefix over-match by `Bash(rm:*)`; that did not fire. |
-| M5 | allow `Bash(git status:*)` only | `git status --short` | Allowed | Allowed (2026-05-20) — Session C's allow list contained only `Bash(git status:*)` (no `Bash(git:*)`), so the Allowed outcome attributes unambiguously to the multi-word rule. |
+| M4 | `Bash(zprobe:*)` (no other rule for `zprobeext` in scope) | `zprobeext --help` | Denied if word-boundary tokenisation; Allowed if pure literal prefix matching | |
+| M5 | `Bash(git status:*)` only | `git status --short` | Allowed | Allowed (2026-05-20) — allow list contained only `Bash(git status:*)` (no `Bash(git:*)`), so the Allowed outcome attributes unambiguously to the multi-word rule. |
 
 **Known limit:** the catalog does not probe whether a multi-word allow
 like `Bash(git status:*)` over-matches a *similar* shape such as
@@ -642,7 +653,7 @@ unambiguously to the multi-word `:*` rule. Bash will then error
 | Bp7 | `xprobe on` (truncated subcommand) | Denied (word-boundary left of `:*`) | |
 | Bp8 | `xprobe one-x` (glued suffix on subcommand) | Denied (word-boundary right of subcommand) | |
 | Bp9 | `xprobeone` (no space between tokens) | Denied (first-token boundary) | |
-| Bp10 | `xprobe two` (different subcommand) | Denied | |
+| Bp10 | `xprobe three` (different subcommand; no rule for `xprobe three` in scope) | Denied | |
 | Bp11 | `xprobe -c FOO=1 one` (flag BEFORE subcommand) | Denied (multi-word rule position-locked at argv 0/1) | |
 
 If Bp Allowed cases match Bm's, the multi-word `:*` rule mechanism is
