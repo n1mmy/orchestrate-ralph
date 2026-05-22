@@ -380,11 +380,15 @@ used here (v2.1.117+ drops them in favour of Bash `bfs`/`ugrep`).
 
 ### Group N — command-name shape (path-bearing first token)
 
-Added 2026-05-20 after a follow-up probe. Doctrine claim:
-`PROMPT.md:93–94` says "Run commands bare, not by full path. `git`,
-`pnpm`, `node` — not `/usr/bin/git`; an explicit path is a different,
-unrecognised shape." These tests measure that rule directly and
-disambiguate it from Group B's argument-path gate.
+Doctrine claim: `PROMPT.md:93–94` says "Run commands bare, not by full
+path. `git`, `pnpm`, `node` — not `/usr/bin/git`; an explicit path is
+a different, unrecognised shape." These tests measure that rule
+directly and disambiguate it from Group B's argument-path gate. N1–N3
+deliberately allow the bare form of the probed command, so a denial
+on the path-bearing form attributes to the first-token-shape gate
+rather than to a missing allow rule. N5/N6 use a fictional allow rule
+because the gate fires before the allow check — any rule shape gives
+the same answer.
 
 | ID | Allow | Command | Expected | Empirical |
 |---|---|---|---|---|
@@ -392,8 +396,8 @@ disambiguate it from Group B's argument-path gate.
 | N2 | `Bash(echo:*)` | `/usr/bin/echo hello` | Denied | Denied (2026-05-20) |
 | N3 | `Bash(ls:*)` | `/bin/ls` | Denied | Denied (2026-05-20) |
 | N4 | (safe list) | `/usr/bin/whoami` | Denied | Denied (2026-05-20) — safe list doesn't cover the path-bearing form |
-| N5 | `Bash(echo:*)` (irrelevant) | `/home/ubuntu/data/local/orchestrate-ralph/CONTEXT.md` (absolute path INSIDE worktree, non-executable file) | Denied if the gate is "first token contains `/`"; Allowed if it's the path-locality gate | Denied (2026-05-20) — proves the gate is on the first token's shape, not on whether the path is inside cwd |
-| N6 | `Bash(echo:*)` (irrelevant) | `./CONTEXT.md` (relative, leading `./`) | Denied if the gate is "first token contains `/`" | Denied (2026-05-20) — `./X` is rejected the same way |
+| N5 | `Bash(xprobe one:*)` (gate fires before allow check) | `/home/ubuntu/data/local/orchestrate-ralph/CONTEXT.md` (absolute path INSIDE worktree, non-executable file) | Denied if the gate is "first token contains `/`"; Allowed if it's the path-locality gate | Denied (2026-05-20, observed under `Bash(echo:*)`) — proves the gate is on the first token's shape, not on whether the path is inside cwd |
+| N6 | `Bash(xprobe one:*)` (gate fires before allow check) | `./CONTEXT.md` (relative, leading `./`) | Denied if the gate is "first token contains `/`" | Denied (2026-05-20, observed under `Bash(echo:*)`) — `./X` is rejected the same way |
 
 N5 is the disambiguation probe. The §2 path-locality gate on argument
 tokens (Group B's `rmdir /etc`, plus the broader command list in
@@ -496,6 +500,35 @@ list; the discriminating probes are the Denied ones.
 - Word boundaries are strict on both sides — left of the first space (Bm9, Bm11) and right of the second token (Bm10).
 - §2 path-locality is **command-specific**, not content-aware (Bm14). Git escapes the gate even with an outside-cwd absolute path.
 - Multi-word allow rules are **position-locked at argv positions 0/1** (Bm16). A leading flag like `git -c <X> status` does not match `Bash(git status:*)`.
+
+### Group Bp — multi-word allow semantics against a non-safe-listed target (supplements Bm; assumption #5)
+
+Mirror of Bm's load-bearing probes against the fictional
+`Bash(xprobe one:*)`. Bm's Allowed cases are co-attributable because
+`git status` is on Baseline's git safe list — the matcher could be
+admitting via either the rule or the safe list. Bp closes that gap:
+with a target on neither safe list, an Allowed outcome attributes
+unambiguously to the multi-word `:*` rule. Bash will then error
+"command not found" on every probe, after the matcher decides.
+
+| ID | Command | Expected | Empirical |
+|---|---|---|---|
+| Bp1 | `xprobe one` | Allowed (bare prefix; `:*` matches empty) | |
+| Bp2 | `xprobe one --foo` (single flag) | Allowed | |
+| Bp3 | `xprobe one --foo=bar` (`=`-suffixed flag) | Allowed | |
+| Bp4 | `xprobe one --foo --bar` (multiple flags) | Allowed | |
+| Bp5 | `xprobe one positional` (positional arg suffix) | Allowed | |
+| Bp6 | `xprobe` (bare leader, no subcommand) | Denied | |
+| Bp7 | `xprobe on` (truncated subcommand) | Denied (word-boundary left of `:*`) | |
+| Bp8 | `xprobe one-x` (glued suffix on subcommand) | Denied (word-boundary right of subcommand) | |
+| Bp9 | `xprobeone` (no space between tokens) | Denied (first-token boundary) | |
+| Bp10 | `xprobe two` (different subcommand) | Denied | |
+| Bp11 | `xprobe -c FOO=1 one` (flag BEFORE subcommand) | Denied (multi-word rule position-locked at argv 0/1) | |
+
+If Bp Allowed cases match Bm's, the multi-word `:*` rule mechanism is
+confirmed as target-agnostic. If they diverge, Bm's prior conclusions
+must be revisited — the safe list was doing more work than the
+acknowledgement implied.
 
 ### Group Bg — git safe list enumeration
 
