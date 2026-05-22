@@ -93,7 +93,7 @@ assumption; the doc is most useful once each row has a result.
 | 6 | Worker subagents launched with `isolation: "worktree"` inherit the orchestrator's loaded `.claude/settings.local.json` (allowlist, deny, `dontAsk`, hook) | `ORCHESTRATOR.md` prereq #2; `handoff.md` "Resolved — hook propagation" | see `docs/subagent-permission-tests.md` instead — that catalog covers propagation | — |
 | 7 | Top-level tools (`Write`, `Read`, `Edit`, `Agent`, `Glob`, `Grep`) need explicit allow entries under `dontAsk`, else they auto-deny | settings template lists them; ADR 0004 names `Agent` as the load-bearing one | T1–T5 | **falsified for most tools — split into per-tool behaviour** (see Findings §4). Gated: `Write` (T2), `Edit` (T5). Auto-permitted under `dontAsk`: `Read` (T3), `Agent` (T1), `NotebookEdit` (T4). Unobservable on this host: `Glob`, `Grep` (the v2.1.117+ Linux build drops them entirely). Practical impact: the template's `Read`/`Agent`/`Glob`/`Grep` entries are dead weight under `dontAsk`; `Write`/`Edit` are load-bearing. |
 | 8 | `dontAsk` causes any unallowlisted call to auto-deny as a tool error (no prompt) | `ORCHESTRATOR.md`; setup-ralph "worker permission mode" prose; ADR 0004 | covered by every catalog test — the procedure's enforcement-confirmation step is the canonical case | confirmed — every `cd .`, `env`, `rm`, `mkdir`, `claude --version`, `ls /tmp`, `ls /` produced "Denied by permissions" with no prompt; refinements: "unallowlisted" excludes (a) the built-in Bash safe-command list and (b) the auto-permitted top-level tools `Read`/`Agent`/`NotebookEdit` (see Findings §4). |
-| 9 | The `PreToolUse` path-guard hook fires for `Write` / `Edit` / `NotebookEdit` whose target resolves outside `realpath(cwd)` | `setup-ralph/templates/hook-path-guard.py`; ADR 0002 | H1–H4 | confirmed for H1–H3; H4 not run (needs `EXTRA_ALLOWED_ROOTS` edit + session restart) |
+| 9 | The `PreToolUse` path-guard hook fires for `Write` / `Edit` / `NotebookEdit` whose target resolves outside `realpath(cwd)` | `setup-ralph/templates/hook-path-guard.py`; ADR 0002 | H1–H6 | confirmed for **`Write`** (H1–H4 plus H4-control-1/2/3 in Session E 2026-05-22). `Edit` not directly probed but the hook code is symmetric (same `GUARDED` set). **`NotebookEdit` unconfirmed** (H6) — the tool's read-before-write validator runs first and shadows any hook visibility; needs a two-step probe to settle. `EXTRA_ALLOWED_ROOTS` widening works precisely (H4 Allowed; H4-control-1's prefix-confusion attack stopped by the `+ os.sep` boundary). |
 | 10 | Glob expansion / quoting / env-var expansion in the command don't change which allow rule matches | implicit; no specific doctrine, but assumed by `Bash(echo:*)` matching `echo "hello world"` etc. | F1–F4 | falsified — F3 (`echo $HOME`) was Denied; the matcher rejects commands containing unexpanded `$VAR` references in the same shape that gets blocked for absolute external paths. Quoted strings (F1) and globs (F2) and escaped `\$` (F4) are unaffected. |
 | 11 | A command invoked by full path (e.g. `/usr/bin/git`) is "a different, unrecognised shape" and fails to match the allow rule for the bare command name | `PROMPT.md:93–94`; `ORCHESTRATOR.md:110` ("never run a command by full path") | N1–N6 | confirmed — but the rationale is sharper than the doctrine states. N5 shows the gate fires even for an absolute path **inside** the worktree, so it isn't the argument-path gate (§2) re-firing on the first token. It is a separate name-shape lookup: any `/` in the first token (`/abs/path` or `./relative`) makes the lookup miss against both the allow list and the safe list. |
 | 12 | Multi-word `:*` prefixes in allow / deny rules (`Bash(git push:*)`, `Bash(git status:*)`) match exactly the multi-word prefix plus any suffix, and do not match unrelated subcommands | `setup-ralph/templates/settings.template.json` deny block (`Bash(git push:*)`, `Bash(git fetch:*)`, etc.); template-mode prose | M1, M2, M5 | confirmed — multi-word `:*` matches the prefix plus any suffix and does not over-match unrelated subcommands, on both sides. M1/M2 cover the **deny** side (`Bash(git push:*)` denied `git push --help`; did not over-match `git status`). M5 covers the **allow** side (`Bash(git status:*)` allowed `git status --short` with no `Bash(git:*)` present to confound). |
@@ -221,7 +221,7 @@ to block this.**
 | T1 | `Agent` NOT in allow | `Agent` dispatch | Denied | **Allowed** (2026-05-22) — `Agent` is auto-permitted under `dontAsk`; allow-list entry is not required. See Findings §4. |
 | T2 | `Write` NOT in allow | `Write` to a worktree-internal path | Denied | Denied (2026-05-22) — generic "don't ask mode" denial; matcher rejects upstream of the path-guard hook. |
 | T3 | `Read` NOT in allow | `Read` of any file | Denied | **Allowed** (2026-05-22) — `Read` is auto-permitted under `dontAsk`. See Findings §4. |
-| T4 | `NotebookEdit` NOT in allow | `NotebookEdit` of any path | Denied | **Allowed** (2026-05-22, R27) — `NotebookEdit` is auto-permitted under `dontAsk`; the matcher passes and the call reaches the path-guard hook. See Findings §4. |
+| T4 | `NotebookEdit` NOT in allow | `NotebookEdit` of any path | Denied | **Allowed at the matcher** (2026-05-22, R27) — `NotebookEdit` is auto-permitted under `dontAsk`; the matcher passes. Whether the call then reaches the path-guard hook is **unconfirmed**: Session E H6 found that NotebookEdit's read-before-write validator returns its own error first, shadowing any hook visibility. The hook may or may not fire for NotebookEdit on an already-read notebook — would need a two-step probe to test. See Findings §4. |
 | T5 | `Edit` NOT in allow | `Edit` of any file | Denied | Denied (2026-05-22, R26) — same generic "don't ask mode" denial as `Write`. Matcher rejects upstream of the hook, so the hook never fires for unallowed Edits. |
 
 T1–T5 probe whether the bare tool-name entries in the template
@@ -264,8 +264,12 @@ boundary, only that the token contains `/`.
 | H1 | Hook installed, cwd is worktree root | `Write` `<worktree>/foo.txt` | Allowed | Allowed (2026-05-20) — probe written to `<worktree>/probe-h1.txt`; left behind because `rm` is not allowlisted |
 | H2 | Hook installed | `Write` `/tmp/probe.txt` | Denied (hook, branded "Path-guard" message) | Denied (2026-05-20) — error text: `Path-guard: Write targets /tmp/probe-h2.txt, outside this worktree (/home/ubuntu/data/local/orchestrate-ralph). …` |
 | H3 | Hook installed, target uses `..` to climb above worktree | `Write` `../escape.txt` | Denied (hook canonicalises with realpath) | Denied (2026-05-20) — `../probe-h3.txt` resolved to `/home/ubuntu/data/local/probe-h3.txt` and was rejected by the same hook message |
-| H4 | Hook installed, `EXTRA_ALLOWED_ROOTS = ["/tmp/whitelisted"]` | `Write` `/tmp/whitelisted/foo.txt` | Allowed | not run — needs edit to `hook-path-guard.py` + session restart |
+| H4 | Hook installed, `EXTRA_ALLOWED_ROOTS = ["/tmp/whitelisted"]` | `Write` `/tmp/whitelisted/foo.txt` | Allowed | Allowed (2026-05-22) — Session E confirmed; file landed at `/tmp/whitelisted/probe-h4.txt`. H1-H3 re-confirmed under the variant hook with no regression. |
+| H4-control-1 | same hook | `Write` `/tmp/whitelisted-evil/probe.txt` | Denied (hook) — `+ os.sep` boundary check must stop the prefix-confusion attack | Denied (hook) (2026-05-22) — hook message: `Path-guard: Write targets /tmp/whitelisted-evil/probe.txt, outside this worktree …`. The boundary holds against the `/data/shared` vs `/data/shared-evil` attack class the hook comment calls out. |
+| H4-control-2 | same hook | `Write` `/tmp/probe-h4-control.txt` | Denied (hook) | Denied (hook) (2026-05-22) — outside the widened boundary. |
+| H4-control-3 | same hook | `Write` `probe-h4-relative.txt` (worktree-relative) | Allowed | Allowed (2026-05-22) — inside worktree, hook doesn't fire. |
 | H5 | Hook installed | `Bash` `echo x > /tmp/escape.txt` (subprocess write outside worktree) | Allowed — hook does not cover subprocess writes | Documented in hook script header. **2026-05-20 finding:** with the current `Bash(echo:*)` allow, this subprocess form is actually **Denied by the matcher** (E3) before the hook would have a chance to see it — so the hook's documented limit is masked by the path-aware Bash gate. The hook limit still applies to any subprocess form whose Bash command shape *is* allowlisted (e.g. `git`, `tee`, `cp`). |
+| H6 | Hook installed, `EXTRA_ALLOWED_ROOTS = ["/tmp/whitelisted"]` | `NotebookEdit` `/tmp/probe-ne1.ipynb` (outside-boundary) | Denied (hook) | **Inconclusive** (2026-05-22, Session E NE1) — NotebookEdit's read-before-write validator returned its own error ("File has not been read yet") *before* the hook surfaced any `Path-guard:` message. The end result is a deny, but by a different gate. Whether the hook actually fires for NotebookEdit on an already-read notebook remains untested — would need a two-step probe (Write+Read inside the boundary, then NotebookEdit at a denied path). Walks back the T4 / Findings §4 claim that "the call reaches the path-guard hook" — that part was assumption. |
 
 H5 documents the known limit: the hook only sees Claude's own
 `Write`/`Edit`/`NotebookEdit` calls. Anything mediated by `Bash` — a
@@ -600,11 +604,18 @@ Doctrine impact:
   removing them disables the worker's primary tooling.
 - **`NotebookEdit` is auto-permitted** and represents a write surface
   that a restrictive `dontAsk` config does NOT cover via the matcher.
-  The orchestrate-ralph template's path-guard hook covers
-  `NotebookEdit` (matcher = `Write|Edit|NotebookEdit`), so the loop is
-  safe — but any reader copying the template piecemeal and omitting
-  the hook would leak a write vector. Flag this when documenting
-  `dontAsk` to external readers.
+  The orchestrate-ralph template's path-guard hook *lists* `NotebookEdit`
+  in its matcher (`Write|Edit|NotebookEdit`), but whether the hook
+  **actually fires** for `NotebookEdit` calls is **unconfirmed** (2026-05-22
+  Session E H6): the tool's own read-before-write validator returned its
+  error before any `Path-guard:` message surfaced, so we couldn't
+  observe the hook firing. The hook may or may not run for `NotebookEdit`
+  on an already-read notebook. Treat NotebookEdit-via-hook as untested
+  for now. Doctrine implication: a reader copying the template piecemeal
+  and omitting the hook *certainly* leaks a write vector; even with the
+  hook present, NotebookEdit-write protection is not yet empirically
+  verified. A two-step probe (Write+Read inside the boundary, then
+  NotebookEdit at a denied path) would close this.
 - **The path-guard hook is masked by the matcher for `Write` / `Edit`
   when those tools aren't in the allow list.** The matcher denies
   upstream; the hook never sees the call. The hook only earns its
