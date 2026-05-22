@@ -323,8 +323,7 @@ suggests any of those Baseline claims may have drifted.
 
 ## Reading probe responses
 
-A probe agent reports JSON; consume it carefully. The shape that worked
-in the falsifying session:
+A probe agent reports JSON; consume it carefully. A workable shape:
 
 ```json
 {
@@ -341,11 +340,13 @@ in the falsifying session:
 }
 ```
 
-In the prompt, instruct the probe to *distinguish* `prompted-then-denied`
-from `denied-by-permissions` from `denied-by-hook` — the operator's
-response to a fallback prompt is not the same thing as a clean
-enforcement deny. If your probe just records "denied" without specifying
-which path, the data is useless.
+In the prompt, instruct the probe to classify each outcome into one
+of the four buckets defined in
+[Baseline § Deny shapes](#deny-shapes--message-form-distinctions):
+Allowed, Denied (deny rule), Denied (allow rule missing), Denied
+(path-guard hook), or Prompted. If your probe just records "denied"
+without specifying which message form, the data is useless — the
+three deny shapes carry different attributions.
 
 When running probes manually (you are the operator), the rule is: **deny
 every prompt that fires inside a probe subagent**. A prompt is itself a
