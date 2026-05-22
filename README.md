@@ -13,7 +13,7 @@ deliberately no headless driver (see [ADR 0001](docs/adr/0001-tracker-agnostic-p
 
 ## What's in here
 
-Three skills:
+Four skills:
 
 - **`setup-ralph/`** — per-repo configuration. A fresh run autodetects the
   project's verification gate, gathers the orchestrator's config, and writes
@@ -30,6 +30,12 @@ Three skills:
   `PROMPT.md` with the canonical skill via a symlink. See
   [ADR 0007](docs/adr/0007-single-worker-default-two-skill-split.md) for
   why the canonical mode is single-worker.
+- **`cleanup-ralph/`** — interactive reaper for the
+  `.claude/worktrees/*` auto-isolation pile that builds up across
+  crashed runs, `/quit`-mid-wave, and `EnterWorktree` sessions the user
+  never explicitly removed. Skips worktrees held by other live claude
+  sessions; uses `git branch -d` (not `-D`) so unmerged integration
+  branches survive as "kept" entries the user decides about manually.
 
 ## Prerequisites
 
@@ -47,13 +53,14 @@ worker per round.
 
 ## Install
 
-Copy or symlink the three skill directories into your skills directory
+Copy or symlink the four skill directories into your skills directory
 (`~/.claude/skills/` or `~/.agents/skills/`):
 
 ```
 ~/.claude/skills/setup-ralph                 →  setup-ralph/
 ~/.claude/skills/orchestrate-ralph           →  orchestrate-ralph/
 ~/.claude/skills/orchestrate-ralph-parallel  →  orchestrate-ralph-parallel/
+~/.claude/skills/cleanup-ralph               →  cleanup-ralph/
 ```
 
 `orchestrate-ralph-parallel/PROMPT.md` is a relative symlink to
@@ -88,8 +95,10 @@ orchestrate-ralph/
 │   ├── SKILL.md
 │   ├── ORCHESTRATOR.md
 │   └── PROMPT.md
-└── orchestrate-ralph-parallel/
-    ├── SKILL.md
-    ├── ORCHESTRATOR.md
-    └── PROMPT.md  → ../orchestrate-ralph/PROMPT.md
+├── orchestrate-ralph-parallel/
+│   ├── SKILL.md
+│   ├── ORCHESTRATOR.md
+│   └── PROMPT.md  → ../orchestrate-ralph/PROMPT.md
+└── cleanup-ralph/
+    └── SKILL.md
 ```
