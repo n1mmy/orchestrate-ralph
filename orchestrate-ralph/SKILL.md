@@ -11,10 +11,16 @@ round), see `/orchestrate-ralph-parallel`.
 
 ## Prerequisites — check first, stop if any is missing
 
-Run each check as its own bare `Bash` call — `echo`-labelled bundles and
-`&&` chains lose the clean per-check signal you'd otherwise get on the first
-failure. For the file-existence checks in item 1, prefer `Read` or `Glob` —
-no `Bash` is needed at all.
+**You operate on cwd.** Your current working directory *is* the integration
+worktree; if it isn't, halt and tell the user to relaunch claude from
+inside it. **Never** `git -C` into another path, and never pass an
+absolute path outside cwd — both denials are enforced, and reaching for
+them at all means you are not where you think you are.
+
+Run each check as its own bare `Bash` call — bundling checks into one
+compound loses the per-check signal you'd otherwise get on the first
+failure. For the file-existence checks in item 1, prefer `Read` or `Glob`
+— no `Bash` is needed at all.
 
 1. **`setup-ralph` has been run.** `docs/agents/ralph.md` and
    `.ralph/settings.json` must both exist. If not, tell the user to run
