@@ -111,11 +111,16 @@ by ensuring claude was launched *after* the placement.
   also require a restart for the same reason; the repair-mode prose
   carries this forward.
 - **The handoff's previously-resolved "hook propagation to worker
-  subagents" claim is now partially re-opened.** Phase 1 from *unenforced*
-  parents could not reproduce it; the claim was for *enforced* parents
-  (the model this ADR now codifies). Re-verification under the new
-  configuration is owed — the strongest current evidence is the
-  empirical AFK runs that motivated this ADR.
+  subagents" claim is re-confirmed (2026-05-22, Session F).** All four
+  mechanisms (deny block, `dontAsk`, path-guard hook with branded
+  `Path-guard:` message, auto-isolation cwd) propagate end-to-end from
+  an enforced parent into a worker subagent dispatched with
+  `subagent_type: "claude"` and `isolation: "worktree"`. Methodology
+  and per-probe outcomes are recorded in
+  `docs/subagent-permission-tests.md` "Resolved 2026-05-22". The
+  earlier Phase 1 non-reproduction was specifically the *unenforced*
+  parent case, which V1–V4 also showed fails uniformly — the new
+  finding doesn't contradict it.
 - **`ADR 0003`'s "the orchestrator runs in the user's session" framing in
   its permissions paragraph is still accurate**, just less load-bearing
   now: the orchestrator's session is *also* enforced.

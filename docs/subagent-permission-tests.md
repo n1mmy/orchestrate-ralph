@@ -15,8 +15,10 @@ below). Re-run them when:
   catch propagation regressions.
 - A new architecture variant ("what if the orchestrator runs as X") is
   being weighed and you need empirical evidence before committing.
-- ADR 0004's open item — "worker hook propagation under enforced parents
-  has not been re-verified end-to-end" — comes up.
+
+ADR 0004's previously-open item ("worker hook propagation under
+enforced parents has not been re-verified end-to-end") is closed as
+of 2026-05-22 — see "Resolved 2026-05-22" further down.
 
 ## Setup — scaffolding the probe environment
 
@@ -202,16 +204,42 @@ interactive approval rather than under the configuration you're trying
 to test. Approve only the *outer* Agent dispatches (the act of spawning
 the probe subagent itself).
 
-## Open verification items
+## Resolved 2026-05-22 — worker hook propagation under enforced parent
 
-Tracked in ADR 0004:
+**Status:** confirmed end-to-end.
 
-- **Worker hook propagation under an enforced parent** has not been
-  empirically re-verified since the harness drift that broke the older
-  handoff's "Resolved — hook propagation to worker subagents" claim.
-  Scenario 1's worker sub-step is the test. Until that's been run end
-  to end with screenshots / transcripts, the worker-side path-guard hook
-  is doctrine + per-worker self-test, not externally verified.
+Session F of the probe-pending runbook ran Scenario 1's worker sub-step
+in full. The parent session was launched in
+`.claude/worktrees/probe-pending` with `probes/configs/F.json` placed
+at `.claude/settings.local.json` and the unmutated path-guard hook at
+`.ralph/hook-path-guard.py`. Parent enforcement confirmed (`cd .` clean
+deny, no prompt). The parent then dispatched one `Agent` with
+`subagent_type: "claude"` and `isolation: "worktree"`. Inside the worker:
+
+| Probe | Outcome | Evidence |
+|---|---|---|
+| P1 — `Bash git remote -v` | denied-by-permissions | `Permission to use Bash with command git remote -v has been denied.` |
+| P2 — `Write /tmp/probe-f-p2-subagent.txt` | **denied-by-hook (Path-guard branded)** | `Path-guard: Write targets /tmp/probe-f-p2-subagent.txt, outside this worktree (/home/ubuntu/data/local/orchestrate-ralph/.claude/worktrees/agent-a8dd41018259bde66). A Ralph worker writes only inside its own worktree …` |
+| P3 — `Bash env` | denied-by-permissions | `Permission to use Bash has been denied because Claude Code is running in don't ask mode.` |
+| P4 — Agent dispatch from inside worker | not spawned; Agent absent from inventory | `ToolSearch select:Agent,Task` returned no matches |
+| P5 — `pwd` | `/home/ubuntu/data/local/orchestrate-ralph/.claude/worktrees/agent-a8dd41018259bde66` | matches the auto-isolation worktree path scheme |
+
+All three deny shapes the methodology distinguishes were observed
+cleanly (denied-by-permissions, denied-by-hook, neither
+prompted-then-denied). No prompts fired at any layer. The
+load-bearing single fact: **P2's error string contains the
+`Path-guard:` prefix**, which is unforgeable by any other gate. The
+hook fired in the worker subagent with the worker's own
+auto-isolation worktree as the boundary (not the parent's worktree),
+which is the correct behavior — the hook reads `realpath(cwd)` at the
+hook event's cwd.
+
+P4 matches the V1–V4 rejected-variants finding: no subagent in any
+configuration has the `Agent` tool. Orchestrator-as-subagent remains
+structurally impossible.
+
+ADR 0004's open item is closed. The orchestrate-ralph propagation
+story is empirically verified end-to-end.
 
 When you re-run any of these scenarios and find a result that differs
 from what's recorded here, update this doc with the new finding, the
