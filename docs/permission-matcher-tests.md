@@ -31,9 +31,7 @@ falsified assumptions must be removed, not just demoted.
 
 The matcher applies to a session that **loaded a `.claude/settings.local.json`
 at startup**. Setup is identical to the orchestrate-ralph happy path
-(ADR 0004). For a worked example with multi-session swap-and-restart
-and minimal-allowlist probe configurations, see
-[`probes/group-m-runbook.md`](probes/group-m-runbook.md).
+(ADR 0004).
 
 1. **Pick a worktree** (`git worktree add` somewhere disposable).
 2. **Place a probe `.claude/settings.local.json`** — start from
