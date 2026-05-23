@@ -96,9 +96,10 @@ deny list independently — so a pipe or chain between two allowlisted commands
 runs (`pnpm test | head -50` works if both `pnpm test` and `head` are
 allowlisted, useful when the gate's output is huge). What denies regardless of
 allow rules: subshells (`$(...)`, backticks); any argument that's an absolute
-path outside your worktree root, or contains an unexpanded `$VAR` (escape with
-`\$` for a literal); any first token containing `/` (use bare `git`, not
-`/usr/bin/git`); and the explicit denies on `cd`, `git -C`, and remote-git
+path outside your worktree root, or contains a literal `$` or unescaped `*`
+(even `\$VAR` denies — escaping does not lift the gate); any first token
+containing `/` (use bare `git`, not `/usr/bin/git`); and the explicit denies
+on `cd`, `git -C`, and remote-git
 operations (`push` / `fetch` / `pull` / `clone` / `ls-remote` / `remote`).
 Denials surface as clean "Denied by permissions" tool errors under `dontAsk`
 — re-shape as a separate `Bash` call or a different command. Don't wrap with
@@ -112,25 +113,22 @@ shape rules above apply on top of the file, and a small set of read-only
 commands like `whoami`, `pwd`, `date` run without an allow rule.
 
 **Stay in your worktree.** The path-guard hook denies `Write` / `Edit` /
-`NotebookEdit` targeting a path outside `realpath(<worktree-root>)`; the
-matcher's arg-locality gate denies absolute paths outside the worktree in
-Bash arguments (`cat /etc/passwd`, `find /`). Two shapes neither layer
-covers — the orchestrator's escape checks backstop them, but a
-violation is still your fault and shows up on the issue:
+`NotebookEdit` outside `realpath(<worktree-root>)`; the matcher's
+arg-locality gate denies outside-worktree absolute paths in arguments to
+a few path-typed commands (`cat`, `find`, etc.) — but `git` and most
+others slip past, so don't lean on the gate. Two rules cover the shapes
+the static layers don't see (the orchestrator's escape checks backstop
+them, but a violation still surfaces as a comment on the issue):
 
-- **Bash subprocesses that write to paths *you* constructed.** A build
-  tool's output dir, codegen, a test runner's cache — the matcher checks
-  the `Bash` argument string, not what the subprocess does with it. A
-  worker-relative `../other-worktree/x` passed to an allowlisted tool
-  resolves outside your worktree once the subprocess opens it. Address
-  every output path worktree-relative; if you need an absolute path,
-  prepend the worktree root you pinned in step 1 — never recompute it
-  from `$0` / `dirname` / `..`.
-- **Git plumbing on shared refs.** Worktrees share the main `.git/refs/`.
-  `git update-ref` / `git branch -f` / `git symbolic-ref` against any
-  branch other than your own moves a ref the orchestrator owns. Never
-  manipulate refs except on your own branch. A committed escape is fatal
-  to the wave (the orchestrator halts the round on it).
+- **Worktree-relative paths everywhere.** A Bash subprocess (build tool,
+  codegen, test runner) resolves a worker-constructed relative climb
+  *after* the matcher cleared the argument string. If you need an
+  absolute path, prepend the worktree root you pinned in step 1 — never
+  recompute it from `$0` / `dirname` / `..`.
+- **Only manipulate refs on your own branch.** Worktrees share
+  `.git/refs/`; `git update-ref` / `git branch -f` / `git symbolic-ref`
+  against any other branch moves a ref the orchestrator owns. A
+  committed escape halts the round.
 
 ## Budget
 

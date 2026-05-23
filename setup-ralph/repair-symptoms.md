@@ -35,7 +35,7 @@ Candidate causes, distinguished by comparing that string to `settings.json`:
 | Command not allowlisted at all | no `allow` entry matches the command's first token | Add `Bash(<whole command>:*)`. |
 | Allowlisted with the wrong shape | entry is a first-token grant (`Bash(pnpm:*)`) but policy wants the whole command, or vice versa | Rewrite the entry as the **whole gate command** as a `:*` prefix. |
 | Worker command ≠ gate command | the worker ran `pnpm test --filter x`; `ralph.md` / the entry say `pnpm test` | Reconcile: fix `ralph.md`'s gate line, or broaden the entry to the shape actually run. |
-| Subshell or path-locality denial | the string has `$(...)` / backticks, or contains an absolute path outside the worktree, or an unexpanded `$VAR`, or a first token containing `/` | These are matcher-level shape denials no allow entry can rescue; rewrite the command in `ralph.md` to avoid the shape. |
+| Subshell or path-locality denial | the string has `$(...)` / backticks, or contains an absolute path outside the worktree, or an unexpanded shell metachar (`$VAR`, unescaped `*` — even `\$` denies because the matcher reads raw text), or a first token containing `/` | These are matcher-level shape denials no allow entry can rescue; rewrite the command in `ralph.md` to avoid the shape. |
 | Separator chain with an unallowlisted segment | the string has `&&` / `\|` / `;` / `\|\|` chaining commands, and at least one segment is unallowlisted | The matcher decomposes separators and checks each segment, so the denial is on the segment, not on the chain itself. Allowlist the segment, or rewrite the gate command to use only allowlisted ones. |
 | Test runner shells out | the gate command passes, but it spawns a second binary (`node`, `docker`, `tsx`) that is what got denied | Allowlist the spawned binary too. Running the gate command yourself surfaces this. |
 | **Tracker-write verb not allowlisted** | the *orchestrator* is denied on `gh issue edit` / `glab issue update` / `gh issue comment` / `glab issue note` — the verbs it uses to transition issues and write recovery comments | Add the matching tracker verb to `allow` as a whole-command `:*` prefix. See `setup-ralph` [SKILL.md](./SKILL.md#3-write)'s "Tracker verbs" group for the per-tracker list. A re-run of `setup-ralph` does this automatically. |
@@ -43,8 +43,9 @@ Candidate causes, distinguished by comparing that string to `settings.json`:
 
 Verify: the new entry is a whole-command `:*` prefix, not a first-token grant,
 and matches the gate / tracker string exactly. If the gate string itself
-contains a subshell / outside-cwd path / `$VAR` / full path, no allow entry
-will rescue it — the gate must be rewritten.
+contains a subshell / outside-cwd path / shell metachar (`$VAR`, `*`,
+even `\$`) / full path, no allow entry will rescue it — the gate must
+be rewritten.
 
 ---
 

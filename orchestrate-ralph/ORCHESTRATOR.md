@@ -54,26 +54,19 @@ revisit.
   an escape, not whether one can happen. Two layers of static defence catch
   most escape shapes — the path-guard hook in `.ralph/settings.json` (a
   `PreToolUse` hook on `Write` / `Edit` / `NotebookEdit`) hard-denies edits
-  to a path outside `realpath(<worktree>)`, and the matcher's arg-locality
-  gate denies any absolute path outside the worktree appearing in a `Bash`
-  argument. Two residual vectors are *not* statically covered, and that is
-  why step-5 detection still exists:
-  - **Bash subprocesses with constructed paths.** A build tool, codegen, or
-    test runner the worker invokes can write wherever the worker tells it
-    to — the matcher checks the `Bash` arguments, not the subprocess's own
-    file writes. A worker that hands `cargo build --target-dir
-    ../other-worktree/x` to an allowlisted `cargo` only fails the
-    arg-locality gate on the `../other-worktree/x` token *if* the literal
-    string is an absolute path; a relative climb passes the gate, and once
-    `cargo` resolves it, the subprocess writes outside. **Untracked-escape**
-    catches the post-hoc litter.
-  - **Git plumbing on shared refs.** `git update-ref refs/heads/<branch>
-    <sha>` takes a *ref name*, not a path, so arg-locality has nothing to
-    flag; the actual filesystem write happens against the main `.git/refs/`
-    that worktrees share. A worker that smuggled a commit's tip onto the
-    integration branch this way leaves nothing in its own working tree to
-    detect. **Committed-escape** is the only thing that sees it: the
-    integration tip must not have moved before the orchestrator's merge.
+  outside `realpath(<worktree>)`, and the matcher's arg-locality gate denies
+  outside-worktree absolute paths in `Bash` arguments to path-typed commands
+  (`cat`, `head`, `tail`, `wc`, `grep`, `find`, `stat`, `ls` — `git` and most
+  others slip past). Two residual vectors slip through both layers, and
+  step 5 detects them after the fact:
+  - **Bash subprocesses with constructed paths** — a build tool / codegen /
+    test runner resolves a relative-climbing path *after* the matcher
+    cleared the argument string. **Untracked-escape** catches the post-hoc
+    litter.
+  - **Git plumbing on shared refs** — `git update-ref` takes a ref name,
+    not a path, so arg-locality has nothing to flag; worktrees share
+    `.git/refs/`. **Committed-escape** (integration tip moved before the
+    orchestrator's merge) is the only thing that sees it.
 - `run_in_background: true` **silently drops** that isolation — the sub-agent
   then runs in the orchestrator's own worktree on the integration branch.
   Background dispatch is therefore unusable here: the worker would commit
@@ -137,16 +130,15 @@ but native macOS/Linux Claude Code builds drop `Glob` / `Grep`, so if they
 are absent fall back to the allowlisted `rg` / `grep` / `find` (or `bfs` /
 `ugrep`) in `Bash`.
 
-The permission matcher checks each segment of a separator-joined command
-(`&&`, `||`, `;`, `|`, `&`) against allow + deny independently — so a pipe
-between two allowlisted commands runs, and you can use one when bounded
-output matters. What denies regardless: subshells (`$(...)`, backticks);
-absolute paths outside the integration worktree in args, or any unexpanded
-`$VAR`; any first token containing `/` (`/usr/bin/git` denied even with
-`Bash(git:*)`); and the explicit denies on `cd`, `git -C`, and remote-git.
-Denials surface as clean "Denied by permissions" tool errors under
-`dontAsk`. The project's allow list lives in `.ralph/settings.json`
-(= the placed `.claude/settings.local.json`).
+Permission denials surface as clean "Denied by permissions" tool errors
+under `dontAsk`, not as prompts — so a worker denial returns as a `failed`
+outcome (step 5) and a denied gate or bootstrap command in your own run is
+a config-shaped halt (see stop conditions). The matcher's full mechanism
+is the worker's concern, in `PROMPT.md`; you do not construct shapes that
+exercise it (each prerequisite, merge, gate, and tracker call is its own
+bare `Bash`). The project's allow list lives in `.ralph/settings.json`
+(= the placed `.claude/settings.local.json`); read it if you need to see
+the exact gate-command shapes that are allowed.
 
 ## Local git only — never contact a remote
 
