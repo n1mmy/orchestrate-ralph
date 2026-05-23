@@ -96,8 +96,9 @@ deny list independently — so a pipe or chain between two allowlisted commands
 runs (`pnpm test | head -50` works if both `pnpm test` and `head` are
 allowlisted, useful when the gate's output is huge). What denies regardless of
 allow rules: subshells (`$(...)`, backticks); any argument that's an absolute
-path outside your worktree root, or contains an unexpanded `$VAR` (escape with
-`\$` for a literal); any first token containing `/` (use bare `git`, not
+path outside your worktree root, or contains an unexpanded shell metachar
+(`$VAR`, unescaped `*`, etc. — the matcher inspects raw command text, so even
+`\$VAR` denies); any first token containing `/` (use bare `git`, not
 `/usr/bin/git`); and the explicit denies on `cd`, `git -C`, and remote-git
 operations (`push` / `fetch` / `pull` / `clone` / `ls-remote` / `remote`).
 Denials surface as clean "Denied by permissions" tool errors under `dontAsk`

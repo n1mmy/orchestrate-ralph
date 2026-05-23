@@ -326,7 +326,7 @@ assumption; the doc is most useful once each row has a result.
 | 7 | Top-level tools (`Write`, `Read`, `Edit`, `Agent`, `Glob`, `Grep`) need explicit allow entries under `dontAsk`, else they auto-deny | settings template lists them; ADR 0004 names `Agent` as the load-bearing one | T1–T5 | **falsified for most tools — split into per-tool behaviour** (see Findings §4). Gated: `Write` (T2), `Edit` (T5). Auto-permitted under `dontAsk`: `Read` (T3), `Agent` (T1), `NotebookEdit` (T4). Unobservable on this host: `Glob`, `Grep` (the v2.1.117+ Linux build drops them entirely). Practical impact: the template's `Read`/`Agent`/`Glob`/`Grep` entries are dead weight under `dontAsk`; `Write`/`Edit` are load-bearing. |
 | 8 | `dontAsk` causes any unallowlisted call to auto-deny as a tool error (no prompt) | `ORCHESTRATOR.md`; setup-ralph "worker permission mode" prose; ADR 0004 | covered by every catalog test — the procedure's enforcement-confirmation step is the canonical case | confirmed — every `cd .`, `env`, `rm`, `mkdir`, `claude --version`, `ls /tmp`, `ls /` produced "Denied by permissions" with no prompt; refinements: "unallowlisted" excludes (a) the built-in Bash safe-command list and (b) the auto-permitted top-level tools `Read`/`Agent`/`NotebookEdit` (see Findings §4). |
 | 9 | The `PreToolUse` path-guard hook fires for `Write` / `Edit` / `NotebookEdit` whose target resolves outside `realpath(cwd)` | `setup-ralph/templates/hook-path-guard.py`; ADR 0002 | H1–H7 | confirmed for **`Write`** (H1–H4 plus H4-control-1/2/3, 2026-05-22). `Edit` not directly probed but the hook code is symmetric (same `GUARDED` set). **`NotebookEdit` pending** — H6 (single-step) was inconclusive because NotebookEdit's read-before-write validator returns its own error before the hook surfaces. H7 is the two-step disambiguation probe (pre-stage notebook + Read, then NotebookEdit); empty Empirical until run. `EXTRA_ALLOWED_ROOTS` widening works precisely (H4 Allowed; H4-control-1's prefix-confusion attack stopped by the `+ os.sep` boundary). |
-| 10 | Glob expansion / quoting / env-var expansion in the command don't change which allow rule matches | implicit; no specific doctrine, but assumed by `Bash(<cmd>:*)` matching `<cmd> "hello world"` etc. | F1–F4 | pending — Group F reframed to `Bash(rmdir:*)` with all probes unrun. The `$VAR`-shape rejection is the load-bearing falsification: previously observed with `echo $HOME` Denied, preserved as principle in Findings §2 (gate fires on unexpanded `$VAR` tokens). New F3 uses `$PWD` (expands inside cwd) so the Denied attribution will isolate `$VAR` from §2's outside-cwd path rejection. F4 escapes the `$` to test that the shape rejection lifts. |
+| 10 | Glob expansion / quoting / env-var expansion in the command don't change which allow rule matches | implicit; no specific doctrine, but assumed by `Bash(<cmd>:*)` matching `<cmd> "hello world"` etc. | F1–F4 | **partial — broader shell-metachar rejection than `$VAR` alone.** Quoting is transparent (F1 `rmdir "probe f1 dne"` Allowed). But the matcher rejects **any unescaped `*`** (F2 Denied, diverges from Expected) and **any literal `$` byte, even when bash would escape it as `\$`** (F4 Denied, diverges from Expected). F3 `$PWD/...` Denied as expected — isolates the `$VAR` rejection from §2 (`$PWD` expands inside cwd). The matcher inspects the raw pre-shell command text and refuses unexpanded metachars before any path-locality reasoning. See Findings §2 update. |
 | 11 | A command invoked by full path (e.g. `/usr/bin/git`) is "a different, unrecognised shape" and fails to match the allow rule for the bare command name | `PROMPT.md:93–94`; `ORCHESTRATOR.md:110` ("never run a command by full path") | N1–N6 | confirmed — but the rationale is sharper than the doctrine states. N5 shows the gate fires even for an absolute path **inside** the worktree, so it isn't the argument-path gate (§2) re-firing on the first token. It is a separate name-shape lookup: any `/` in the first token (`/abs/path` or `./relative`) makes the lookup miss against both the allow list and the safe list. |
 | 12 | Multi-word `:*` prefixes in allow / deny rules (`Bash(git push:*)`, `Bash(git status:*)`) match exactly the multi-word prefix plus any suffix, and do not match unrelated subcommands | `setup-ralph/templates/settings.template.json` deny block (`Bash(git push:*)`, `Bash(git fetch:*)`, etc.); template-mode prose | M1, M2, M5 | confirmed — multi-word `:*` matches the prefix plus any suffix and does not over-match unrelated subcommands, on both sides. M1/M2 cover the **deny** side (`Bash(git push:*)` denied `git push --help`; did not over-match `git status`). M5 covers the **allow** side (`Bash(git status:*)` allowed `git status --short` with no `Bash(git:*)` present to confound). |
 | 13 | `Bash(<cmd>:*)` matches strictly the first-token command name, not arbitrary first-token text starting with `<cmd>` (i.e., the matcher tokenises on word boundary, so `Bash(rm:*)` does not match `rmdir`) | Implicit everywhere a short command is allowlisted via `:*` (`Bash(rm:*)` would be problematic if it over-matched `rmdir`); also a security-relevant property of every `Bash(<short>:*)` rule | M4 | previously confirmed (2026-05-20) with `Bash(rm:*)` + `rmdir --help` Denied. M4 is now rebased onto the fictional pair `Bash(zprobe:*)` + `zprobeext --help` so it fits into the consolidated S1 config without conflicting with `Bash(rmdir:*)`; same matcher principle, target-agnostic. Probe is unrun under the new shape. |
@@ -362,11 +362,11 @@ directory" without side effect).
 
 | ID | Allow | Command | Expected | Empirical |
 |---|---|---|---|---|
-| A1 | `Bash(rmdir:*)` | `rmdir` (bare; matcher passes, rmdir errors "missing operand") | Allowed | |
-| A2 | `Bash(rmdir:*)` | `rmdir probe-a2-dne` (single positional) | Allowed | |
-| A3 | `Bash(rmdir:*)` | `rmdir probe-a3-dne-1 probe-a3-dne-2` (multiple positionals) | Allowed | |
-| A4 | `Bash(rmdir:*)` | `rmdir "probe a4 dne"` (quoted positional with space) | Allowed | |
-| A5 | `Bash(rmdir:*)` | `  rmdir probe-a5-dne` (leading whitespace) | Allowed | |
+| A1 | `Bash(rmdir:*)` | `rmdir` (bare; matcher passes, rmdir errors "missing operand") | Allowed | Allowed (2026-05-23) — rmdir errored "missing operand" after matcher passed |
+| A2 | `Bash(rmdir:*)` | `rmdir probe-a2-dne` (single positional) | Allowed | Allowed (2026-05-23) |
+| A3 | `Bash(rmdir:*)` | `rmdir probe-a3-dne-1 probe-a3-dne-2` (multiple positionals) | Allowed | Allowed (2026-05-23) |
+| A4 | `Bash(rmdir:*)` | `rmdir "probe a4 dne"` (quoted positional with space) | Allowed | Allowed (2026-05-23) |
+| A5 | `Bash(rmdir:*)` | `  rmdir probe-a5-dne` (leading whitespace) | Allowed | Allowed (2026-05-23) |
 
 ### Group B — flag-bearing variants and §2 boundary (assumption #5; §2 for path-typed commands)
 
@@ -380,29 +380,29 @@ on a non-empty directory.
 
 | ID | Allow | Command | Expected | Empirical |
 |---|---|---|---|---|
-| B1 | `Bash(rmdir:*)` | `rmdir --help` (single flag) | Allowed | |
-| B2 | `Bash(rmdir:*)` | `rmdir -p probe-b2-dne` (flag + positional) | Allowed | |
-| B3 | `Bash(rmdir:*)` | `rmdir /etc` (outside-cwd absolute) | Denied by §2 | |
-| B4 | `Bash(rmdir:*)` | `rmdir probe-b4-dne` (cwd-relative) | Allowed | |
+| B1 | `Bash(rmdir:*)` | `rmdir --help` (single flag) | Allowed | Allowed (2026-05-23) |
+| B2 | `Bash(rmdir:*)` | `rmdir -p probe-b2-dne` (flag + positional) | Allowed | Allowed (2026-05-23) |
+| B3 | `Bash(rmdir:*)` | `rmdir /etc` (outside-cwd absolute) | Denied by §2 | Denied (2026-05-23) — §2 fires under explicit allow rule, confirming `rmdir` on the §2 list |
+| B4 | `Bash(rmdir:*)` | `rmdir probe-b4-dne` (cwd-relative) | Allowed | Allowed (2026-05-23) |
 
 ### Group C — exact match, no `:*` (assumption #2)
 
 | ID | Allow | Command | Expected | Empirical |
 |---|---|---|---|---|
-| C5 | `Bash(xprobe two)` | `xprobe two` (bare match) | Allowed (matcher passes; bash then errors "command not found") | |
-| C6 | `Bash(xprobe two)` | `xprobe two --watch` (flag suffix) | Denied (exact match doesn't accept suffix) | |
-| C7 | `Bash(xprobe two)` | `xprobe two src` (positional suffix) | Denied | |
-| C8 | `Bash(xprobe two)` | `xprobe` (bare leader only, no subcommand) | Denied | |
-| C9 | `Bash(xprobe two)` | `xprobe three` (different subcommand; no rule for `xprobe three` in scope) | Denied | |
-| Cr1 | `Bash(yprobe)` | `yprobe` (bare) | Allowed (matcher passes; bash errors "command not found") | |
-| Cr2 | `Bash(yprobe)` | `yprobe foo` | Denied (allow rule missing — exact does NOT accept any suffix token) | |
-| Cr3 | `Bash(yprobe)` | `yprobe ""` (empty quoted arg) | Denied | |
-| Cr4 | `Bash(yprobe)` | `yprobe  foo` (two spaces) | Denied (extra whitespace is not normalised; the second space + foo is a suffix) | |
-| Cr5 | `Bash(yprobe)` | `yprobe --help` | Denied (a flag arg is still a suffix) | |
-| Cr6 | `Bash(yprobe)` | `yprobe -p foo` | Denied | |
-| Cr7 | `Bash(yprobe)` | `yprobe foo bar` | Denied | |
-| Cr8 | `Bash(yprobe)` | `yprobe /tmp/probe-cr8` (outside-cwd path) | Denied (allow rule missing — exact doesn't match; §2 wouldn't fire either since `yprobe` isn't on the §2 list, but the allow check is dispositive first) | |
-| Cr9 | `Bash(yprobe)` | `yprobe probe-cr9` (cwd-relative) | Denied | |
+| C5 | `Bash(xprobe two)` | `xprobe two` (bare match) | Allowed (matcher passes; bash then errors "command not found") | Allowed (2026-05-23) — bash "command not found" after matcher passed |
+| C6 | `Bash(xprobe two)` | `xprobe two --watch` (flag suffix) | Denied (exact match doesn't accept suffix) | Denied (2026-05-23) |
+| C7 | `Bash(xprobe two)` | `xprobe two src` (positional suffix) | Denied | Denied (2026-05-23) |
+| C8 | `Bash(xprobe two)` | `xprobe` (bare leader only, no subcommand) | Denied | Denied (2026-05-23) |
+| C9 | `Bash(xprobe two)` | `xprobe three` (different subcommand; no rule for `xprobe three` in scope) | Denied | Denied (2026-05-23) |
+| Cr1 | `Bash(yprobe)` | `yprobe` (bare) | Allowed (matcher passes; bash errors "command not found") | Allowed (2026-05-23) |
+| Cr2 | `Bash(yprobe)` | `yprobe foo` | Denied (allow rule missing — exact does NOT accept any suffix token) | Denied (2026-05-23) |
+| Cr3 | `Bash(yprobe)` | `yprobe ""` (empty quoted arg) | Denied | Denied (2026-05-23) |
+| Cr4 | `Bash(yprobe)` | `yprobe  foo` (two spaces) | Denied (extra whitespace is not normalised; the second space + foo is a suffix) | Denied (2026-05-23) |
+| Cr5 | `Bash(yprobe)` | `yprobe --help` | Denied (a flag arg is still a suffix) | Denied (2026-05-23) |
+| Cr6 | `Bash(yprobe)` | `yprobe -p foo` | Denied | Denied (2026-05-23) |
+| Cr7 | `Bash(yprobe)` | `yprobe foo bar` | Denied | Denied (2026-05-23) |
+| Cr8 | `Bash(yprobe)` | `yprobe /tmp/probe-cr8` (outside-cwd path) | Denied (allow rule missing — exact doesn't match; §2 wouldn't fire either since `yprobe` isn't on the §2 list, but the allow check is dispositive first) | Denied (2026-05-23) |
+| Cr9 | `Bash(yprobe)` | `yprobe probe-cr9` (cwd-relative) | Denied | Denied (2026-05-23) |
 | Cs1 | `Bash(rmdir)` (irrelevant to echo) | `echo` (bare) | unknown — depends on safe list | **Allowed** (2026-05-22) — no `Bash(echo*)` rule present; `echo` is on the Bash safe list (see Baseline). |
 | Cs2 | same | `echo hello` | depends | Allowed (2026-05-22) — with-arg form also safe-listed |
 | Cs3 | same | `printf` (bare) | depends | Allowed (2026-05-22) — bare printf safe-listed (the Session A `printf "hi\n"` probe only confirmed the with-arg shape; this fills the gap) |
@@ -418,12 +418,12 @@ half because `Bash(cd:*)` is in the standard template's deny block.
 
 | ID | Allow / Deny | Command | Expected | Empirical |
 |---|---|---|---|---|
-| D1 | `Bash(rmdir:*)` | `rmdir probe-d1-1-dne && rmdir probe-d1-2-dne` | Allowed (both halves match) | |
-| D2 | `Bash(rmdir:*)`, deny `Bash(cd:*)` | `rmdir probe-d2-dne && cd .` | Denied (deny rule on right half) | |
-| D3 | `Bash(rmdir:*)` only (no `Bash(env)`) | `rmdir probe-d3-dne && env` | Denied (env half fails allow check) | |
-| D4 | `Bash(rmdir:*)` | `rmdir probe-d4-1-dne ; rmdir probe-d4-2-dne` (semicolon) | Allowed | |
-| D5 | `Bash(rmdir:*)` | `rmdir probe-d5-1-dne \|\| rmdir probe-d5-2-dne` (or-else) | Allowed | |
-| D6 | `Bash(rmdir:*)` | `rmdir probe-d6-dne &` (background) | Allowed | |
+| D1 | `Bash(rmdir:*)` | `rmdir probe-d1-1-dne && rmdir probe-d1-2-dne` | Allowed (both halves match) | Allowed (2026-05-23) |
+| D2 | `Bash(rmdir:*)`, deny `Bash(cd:*)` | `rmdir probe-d2-dne && cd .` | Denied (deny rule on right half) | Denied (deny rule) (2026-05-23) — error includes "with command rmdir probe-d2-dne && cd ." form, distinct from missing-allow message |
+| D3 | `Bash(rmdir:*)` only (no `Bash(env)`) | `rmdir probe-d3-dne && env` | Denied (env half fails allow check) | Denied (allow rule missing) (2026-05-23) |
+| D4 | `Bash(rmdir:*)` | `rmdir probe-d4-1-dne ; rmdir probe-d4-2-dne` (semicolon) | Allowed | Allowed (2026-05-23) |
+| D5 | `Bash(rmdir:*)` | `rmdir probe-d5-1-dne \|\| rmdir probe-d5-2-dne` (or-else) | Allowed | Allowed (2026-05-23) |
+| D6 | `Bash(rmdir:*)` | `rmdir probe-d6-dne &` (background) | Allowed | Allowed (2026-05-23) |
 
 ### Group E — pipes, redirects, subshells (assumption #3)
 
@@ -438,18 +438,18 @@ as a safety net.
 
 | ID | Allow | Command | Expected | Empirical |
 |---|---|---|---|---|
-| E1 | `Bash(rmdir:*)` | `rmdir probe-e1-dne \| tail -1` (`tail` safe-listed) | Allowed (rmdir via the rule; tail via the safe list — both stages clear) | |
-| E2 | `Bash(rmdir:*)` only (no `Bash(env)`) | `rmdir probe-e2-dne \| env` | Denied (env stage fails allow check) | |
-| E3 | `Bash(rmdir:*)` | `rmdir probe-e3-dne > /etc/probe-e3-out` | Denied by §2 on the redirect target | |
-| E4 | `Bash(rmdir:*)` only (no `Bash(env)`) | `rmdir probe-e4-dne 2>&1 \| env` | Denied (stderr redirect doesn't disguise the env stage) | |
-| E5 | `Bash(rmdir:*)` | `rmdir $(echo probe-e5)` (subshell substitution) | Denied (subshell shape rejected) | |
-| E6 | `Bash(rmdir:*)` | `` rmdir `echo probe-e6` `` (backtick substitution) | Denied (backtick shape rejected) | |
-| E7 | `Bash(xprobe one:*)` | `xprobe one 2>&1 \| tail -1` (multi-word + safe-listed second stage) | Allowed (both stages clear; tail via safe list) | |
-| E8 | `Bash(xprobe one:*)` only (no `Bash(env)`) | `xprobe one \| env` (multi-word + non-safe-listed second stage) | Denied (env stage fails allow check; pipe decomposes per-stage even with multi-word leader) | |
-| E9 | `Bash(xprobe one:*)` only | `xprobe one 2>&1 \| env` (stderr redirect doesn't disguise) | Denied | |
-| E10 | `Bash(xprobe one:*)` only | `xprobe one && env` (`&&` decomposes with multi-word leader) | Denied | |
-| E11 | `Bash(xprobe one:*)`, `Bash(rmdir:*)` | `xprobe one && rmdir probe-e11-dne` (both halves match different rules) | Allowed | |
-| E12 | `Bash(xprobe one:*)` | `xprobe one \| cat /tmp/probe-e12` (§2 fires on downstream cat) | Denied (§2 on downstream stage despite leading-stage match) | |
+| E1 | `Bash(rmdir:*)` | `rmdir probe-e1-dne \| tail -1` (`tail` safe-listed) | Allowed (rmdir via the rule; tail via the safe list — both stages clear) | Allowed (2026-05-23) |
+| E2 | `Bash(rmdir:*)` only (no `Bash(env)`) | `rmdir probe-e2-dne \| env` | Denied (env stage fails allow check) | Denied (2026-05-23) — pipe decomposes per-stage |
+| E3 | `Bash(rmdir:*)` | `rmdir probe-e3-dne > /etc/probe-e3-out` | Denied by §2 on the redirect target | Denied (2026-05-23) |
+| E4 | `Bash(rmdir:*)` only (no `Bash(env)`) | `rmdir probe-e4-dne 2>&1 \| env` | Denied (stderr redirect doesn't disguise the env stage) | Denied (2026-05-23) |
+| E5 | `Bash(rmdir:*)` | `rmdir $(echo probe-e5)` (subshell substitution) | Denied (subshell shape rejected) | Denied (2026-05-23) |
+| E6 | `Bash(rmdir:*)` | `` rmdir `echo probe-e6` `` (backtick substitution) | Denied (backtick shape rejected) | Denied (2026-05-23) |
+| E7 | `Bash(xprobe one:*)` | `xprobe one 2>&1 \| tail -1` (multi-word + safe-listed second stage) | Allowed (both stages clear; tail via safe list) | Allowed (2026-05-23) — bash "command not found" after matcher passed |
+| E8 | `Bash(xprobe one:*)` only (no `Bash(env)`) | `xprobe one \| env` (multi-word + non-safe-listed second stage) | Denied (env stage fails allow check; pipe decomposes per-stage even with multi-word leader) | Denied (2026-05-23) |
+| E9 | `Bash(xprobe one:*)` only | `xprobe one 2>&1 \| env` (stderr redirect doesn't disguise) | Denied | Denied (2026-05-23) |
+| E10 | `Bash(xprobe one:*)` only | `xprobe one && env` (`&&` decomposes with multi-word leader) | Denied | Denied (2026-05-23) |
+| E11 | `Bash(xprobe one:*)`, `Bash(rmdir:*)` | `xprobe one && rmdir probe-e11-dne` (both halves match different rules) | Allowed | Allowed (2026-05-23) |
+| E12 | `Bash(xprobe one:*)` | `xprobe one \| cat /tmp/probe-e12` (§2 fires on downstream cat) | Denied (§2 on downstream stage despite leading-stage match) | Denied (2026-05-23) |
 
 E2 is the discriminating probe. If pipes were intra-command (the
 whole pipeline treated as one command, prefix-matched), E2 would be
@@ -473,10 +473,10 @@ co-attributable to §2 firing on an outside-cwd expansion.
 
 | ID | Allow | Command | Expected | Empirical |
 |---|---|---|---|---|
-| F1 | `Bash(rmdir:*)` | `rmdir "probe f1 dne"` (quoted positional with space) | Allowed | |
-| F2 | `Bash(rmdir:*)` | `rmdir probe-f2-dne-*` (glob with no matches; literal `*` passed) | Allowed | |
-| F3 | `Bash(rmdir:*)` | `rmdir $PWD/probe-f3-dne` (`$VAR` expansion to inside cwd) | Denied (`$VAR` shape rejected) | |
-| F4 | `Bash(rmdir:*)` | `rmdir \$PWD-probe-f4-dne` (escaped `$`) | Allowed | |
+| F1 | `Bash(rmdir:*)` | `rmdir "probe f1 dne"` (quoted positional with space) | Allowed | Allowed (2026-05-23) |
+| F2 | `Bash(rmdir:*)` | `rmdir probe-f2-dne-*` (glob with no matches; literal `*` passed) | Allowed | **Denied** (2026-05-23) — diverges from Expected. Unexpanded `*` is rejected by the matcher as a shell-metacharacter shape, similar to the `$VAR` rejection in §2. Broadens Finding §2's metachar-rejection clause beyond `$VAR`. |
+| F3 | `Bash(rmdir:*)` | `rmdir $PWD/probe-f3-dne` (`$VAR` expansion to inside cwd) | Denied (`$VAR` shape rejected) | Denied (2026-05-23) — `$VAR` rejection confirmed independent of §2 (`$PWD` expands inside cwd) |
+| F4 | `Bash(rmdir:*)` | `rmdir \$PWD-probe-f4-dne` (escaped `$`) | Allowed | **Denied** (2026-05-23) — diverges from Expected. The matcher inspects the raw command text and rejects on the literal `$` byte regardless of bash's `\$` escape. Escaping doesn't lift the shell-metachar gate. |
 
 ### Group T — top-level tool gating (assumption #7)
 
@@ -576,7 +576,7 @@ Allows.**
 |---|---|---|---|---|
 | M1 | deny `Bash(git push:*)`, allow `Bash(git:*)` | `git push --help` | Denied | Denied (2026-05-20) — multi-word deny `Bash(git push:*)` matches a `git push <suffix>` shape. |
 | M2 | same | `git status` | Allowed | Allowed (2026-05-20) — multi-word deny does not over-match unrelated `git` subcommands. |
-| M4 | `Bash(zprobe:*)` (no other rule for `zprobeext` in scope) | `zprobeext --help` | Denied if word-boundary tokenisation; Allowed if pure literal prefix matching | |
+| M4 | `Bash(zprobe:*)` (no other rule for `zprobeext` in scope) | `zprobeext --help` | Denied if word-boundary tokenisation; Allowed if pure literal prefix matching | Denied (2026-05-23) — word-boundary tokenisation re-confirmed under the fictional target pair; `zprobe:*` does not over-match `zprobeext`. |
 | M5 | `Bash(git status:*)` only | `git status --short` | Allowed | Allowed (2026-05-20) — allow list contained only `Bash(git status:*)` (no `Bash(git:*)`), so the Allowed outcome attributes unambiguously to the multi-word rule. |
 
 **Known limit:** the catalog does not probe whether a multi-word allow
@@ -642,17 +642,17 @@ unambiguously to the multi-word `:*` rule. Bash will then error
 
 | ID | Command | Expected | Empirical |
 |---|---|---|---|
-| Bp1 | `xprobe one` | Allowed (bare prefix; `:*` matches empty) | |
-| Bp2 | `xprobe one --foo` (single flag) | Allowed | |
-| Bp3 | `xprobe one --foo=bar` (`=`-suffixed flag) | Allowed | |
-| Bp4 | `xprobe one --foo --bar` (multiple flags) | Allowed | |
-| Bp5 | `xprobe one positional` (positional arg suffix) | Allowed | |
-| Bp6 | `xprobe` (bare leader, no subcommand) | Denied | |
-| Bp7 | `xprobe on` (truncated subcommand) | Denied (word-boundary left of `:*`) | |
-| Bp8 | `xprobe one-x` (glued suffix on subcommand) | Denied (word-boundary right of subcommand) | |
-| Bp9 | `xprobeone` (no space between tokens) | Denied (first-token boundary) | |
-| Bp10 | `xprobe three` (different subcommand; no rule for `xprobe three` in scope) | Denied | |
-| Bp11 | `xprobe -c FOO=1 one` (flag BEFORE subcommand) | Denied (multi-word rule position-locked at argv 0/1) | |
+| Bp1 | `xprobe one` | Allowed (bare prefix; `:*` matches empty) | Allowed (2026-05-23) — bash "command not found" after matcher passed |
+| Bp2 | `xprobe one --foo` (single flag) | Allowed | Allowed (2026-05-23) |
+| Bp3 | `xprobe one --foo=bar` (`=`-suffixed flag) | Allowed | Allowed (2026-05-23) |
+| Bp4 | `xprobe one --foo --bar` (multiple flags) | Allowed | Allowed (2026-05-23) |
+| Bp5 | `xprobe one positional` (positional arg suffix) | Allowed | Allowed (2026-05-23) |
+| Bp6 | `xprobe` (bare leader, no subcommand) | Denied | Denied (2026-05-23) |
+| Bp7 | `xprobe on` (truncated subcommand) | Denied (word-boundary left of `:*`) | Denied (2026-05-23) |
+| Bp8 | `xprobe one-x` (glued suffix on subcommand) | Denied (word-boundary right of subcommand) | Denied (2026-05-23) |
+| Bp9 | `xprobeone` (no space between tokens) | Denied (first-token boundary) | Denied (2026-05-23) |
+| Bp10 | `xprobe three` (different subcommand; no rule for `xprobe three` in scope) | Denied | Denied (2026-05-23) |
+| Bp11 | `xprobe -c FOO=1 one` (flag BEFORE subcommand) | Denied (multi-word rule position-locked at argv 0/1) | Denied (2026-05-23) — multi-word rule position-locked at argv 0/1, mirroring Bm16 |
 
 If Bp Allowed cases match Bm's, the multi-word `:*` rule mechanism is
 confirmed as target-agnostic. If they diverge, Bm's prior conclusions
@@ -745,16 +745,26 @@ when the command name and explicit allow rule match. The gate is
 | `echo > path` | Denied (`echo hello > /tmp/x`) | (not probed) |
 | **`test`** | **Allowed** (`test -f /etc/issue`, `test -r /etc/shadow`, `test -f /etc/passwd && echo yes`) | Allowed |
 
-Plus the `$VAR` shape:
+Plus shell-metacharacter shapes (separate from the path-locality
+side of this finding):
 
 - `echo $HOME` — Denied
-- `echo \$HOME` — Allowed
+- `echo \$HOME` — Allowed *(observed 2026-05-20 with `echo`; superseded — see F4 below)*
+- `rmdir probe-f2-dne-*` — **Denied** (2026-05-23, F2). Unexpanded `*` in an arg is rejected even when no path is in the token.
+- `rmdir $PWD/probe-f3-dne` — Denied (2026-05-23, F3). Confirms `$VAR` rejection is independent of §2 (`$PWD` expands inside cwd).
+- `rmdir \$PWD-probe-f4-dne` — **Denied** (2026-05-23, F4). The matcher inspects the raw command text and rejects on the literal `$` byte; bash's `\$` escape does not lift the rejection.
 
-The gate fires on any literal absolute path not contained by
-`realpath(cwd)` — ancestor paths like `/home` are rejected too, not
-just sibling paths — and on any token starting with `$` that the
-shell would expand. Quoting alone does not suppress (`echo "$HOME"`
-would presumably still be Denied, untested), but escaping the `$` does.
+So the metachar gate is **command-shape**, not value-aware: any
+unescaped `*` or any literal `$` byte in an arg token denies, regardless
+of what bash would expand or escape. F4 supersedes the earlier
+`echo \$HOME` Allowed observation; the 2026-05-20 result may have
+depended on differing behaviour for `echo` (a safe-listed command
+that bypasses some matcher passes) or has drifted since. Re-probe under
+S2 if the divergence matters.
+
+The path-locality gate is a separate dimension: it fires on any
+literal absolute path not contained by `realpath(cwd)` — ancestor
+paths like `/home` are rejected too, not just sibling paths.
 
 **The gate is command-specific, not derived from a content property.**
 The 2026-05-22 Session A re-probe and Session B Bm14 together rule out

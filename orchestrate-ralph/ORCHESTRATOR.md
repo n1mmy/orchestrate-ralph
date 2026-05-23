@@ -144,7 +144,8 @@ The permission matcher checks each segment of a separator-joined command
 between two allowlisted commands runs, and you can use one when bounded
 output matters. What denies regardless: subshells (`$(...)`, backticks);
 absolute paths outside the integration worktree in args, or any unexpanded
-`$VAR`; any first token containing `/` (`/usr/bin/git` denied even with
+shell metachar (`$VAR`, unescaped `*` — the matcher reads raw command text,
+so even `\$VAR` denies); any first token containing `/` (`/usr/bin/git` denied even with
 `Bash(git:*)`); and the explicit denies on `cd`, `git -C`, and remote-git.
 Denials surface as clean "Denied by permissions" tool errors under
 `dontAsk`. The project's allow list lives in `.ralph/settings.json`
