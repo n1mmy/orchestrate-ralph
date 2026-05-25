@@ -17,7 +17,7 @@ Projects must be set up with `/setup-ralph` before use. The source of issues
 read by ralph is described in markdown files in the repo and is designed to be
 initialized with [`/setup-matt-podock-skills`](https://github.com/mattpocock/skills)
 
-## What's in here
+## Contents
 
 Four skills:
 
