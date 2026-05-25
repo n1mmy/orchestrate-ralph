@@ -24,7 +24,7 @@ Four skills:
 - `/setup-ralph` — per-repo configuration. A fresh run autodetects the
   project's verification gate, gathers the orchestrator's config, and writes
   `docs/agents/ralph.md` and `.ralph/settings.json`. A later run can repair an
-  existing config from a complaint (eg. "workers keep prompting for permissions").
+  existing config from a complaint (eg. "workers need permission for new test command").
 - `/orchestrate-ralph/` — the canonical loop. Dispatches one worker per
   round. Reads `ORCHESTRATOR.md`, becomes the orchestrator, and runs until
   the queue is drained. Carries `PROMPT.md` (the worker doctrine).
