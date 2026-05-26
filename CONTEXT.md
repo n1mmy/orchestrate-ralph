@@ -20,13 +20,6 @@ one git repository.
   own throwaway git worktree on its own branch and inherits the
   orchestrator's enforced permissions one nesting level deeper.
 
-An earlier design considered a three-layer architecture (user session →
-orchestrator subagent → worker subsubagent) to put the orchestrator under
-the same enforced permissions as workers. Phase 1 probes empirically
-falsified the propagation that design relied on — see ADR 0004 and
-`orchestrator-as-subagent-plan.md`. The two-layer model with **restart after
-placement** achieves the same enforcement without the architectural cost.
-
 ## Single mode vs. parallel mode
 
 The package ships two orchestrator skills, picked per invocation:
@@ -34,14 +27,14 @@ The package ships two orchestrator skills, picked per invocation:
 - **`/orchestrate-ralph`** (canonical) — dispatches one worker per round.
   No wave, no merge-ordering, no per-branch recovery. The worker resets to
   the integration tip before working, so the merge is a fast-forward by
-  construction. A red gate rolls integration back to the pre-round tip
+  construction. A failed gate rolls integration back to the pre-round tip
   and the issue stays at `ready-for-agent`. The `parallel-safe` flag in
   `docs/agents/ralph.md` is ignored.
 - **`/orchestrate-ralph-parallel`** (opt-in) — dispatches multiple workers
   per **wave** (N concurrent foreground `Agent` calls in one message).
   Requires `parallel-safe: true` (the repo's tracker exposes a readable
   dependency relation). Adds merge-ordering by prior conflict count, and
-  a per-branch verify / leave-one-out / singleton recovery flow on red
+  a per-branch verify / leave-one-out / singleton recovery flow on failed
   gates. See ADR 0006 for the recovery algorithm and ADR 0007 for the
   split rationale.
 
@@ -70,15 +63,15 @@ The orchestrator owns every phase from merge onwards; workers only
 participate in dispatch and collect.
 
 A **single-mode** round runs in order: **dispatch** → **collect** →
-**merge** → **gate** → **transition**. A red gate triggers a
+**merge** → **gate** → **transition**. A failed gate triggers a
 pre-round-tip reset inside the transition; there is no separate
 recovery phase.
 
 A **parallel-mode** round adds an optional **recover** phase that runs
-when the post-merge gate is red:
+when the post-merge gate is failed:
 
 **dispatch** → **collect** → **merge** → **gate** → **transition** →
-(**recover** if gate red).
+(**recover** if gate failed).
 
 - **Dispatch** — orchestrator discovers eligible issues per the tracker,
   spawns one or more workers (one in single mode; up to `MAX_PARALLEL`

@@ -23,7 +23,7 @@ Supporting trees:
 - `docs/adr/` — architectural decisions (numbered 0001+). Read these
   before reopening a settled question.
 - `docs/permission-matcher-tests.md` — empirical Bash permission-matcher
-  catalog. Re-run after Claude Code version bumps.
+  catalog.
 - `docs/subagent-permission-tests.md` — permission-propagation
   methodology under different parent enforcement states.
 - `plans/` — active implementation plans. `plans/old/` is where landed
@@ -36,14 +36,14 @@ When invoked inside a `.claude/worktrees/<id>` checkout, do all work
 
 - **Permissions.** The worktree's allowlist covers paths inside the
   worktree. `cd`-ing out to the primary checkout (or any sibling
-  worktree) trips permission prompts that block an unattended session.
+  worktree) trips permission prompts that slow interactive workflow.
 - **Blast radius.** Other checkouts may have uncommitted work or be
   driven by other live sessions. Writes or commits made from this
   agent into another checkout corrupt that work; the worktree you
   were given is the only tree you own.
 
-The worktree has full repo access on its own branch — there is no
-operation you need to leave it for.
+The worktree has full `git` access on its own branch — there is no
+`git` operation you need to leave it for.
 
 ## Files see only their own landing folder
 
@@ -81,7 +81,7 @@ When tightening doctrine to fix a worker misbehaviour or a template
 bug, the **fix** belongs in the doctrine, but the **autopsy** does
 not. A reader who didn't make the mistake doesn't need the example;
 the rule plus *type* of violation is enough. Autopsies belong in
-commit messages, ADRs, and `handoff.md` — runtime doctrine should read
+commit messages and ADRs — runtime doctrine should read
 as if it had always been that way.
 
 Signals of an autopsy creeping in: bullets starting "No X" followed by
@@ -119,34 +119,7 @@ It is the branch of whatever worktree the orchestrator is launched
 in. It is *not* setup config; it must not be recorded in
 `docs/agents/ralph.md` or any other persisted config.
 
-## `Glob` / `Grep` tools are not universal
 
-Native macOS/Linux Claude Code builds (v2.1.117+) drop them in favour
-of Bash `bfs` / `ugrep`; a known bug also strips them from custom
-plugin subagents. Worker and orchestrator doctrine must not assume
-they exist. The `.ralph/settings.json` allowlists `rg` / `grep` /
-`find` / `bfs` / `ugrep` plus `cat` / `head` / `tail` / `ls` as the
-Bash fallback; present them as preferred-when-present, not
-guaranteed.
-
-## Doctrine the single skill and parallel skill share
-
-The single-worker skill is the source of truth for N-invariant
-mechanics (prerequisites, session setup, gate procedure, transition,
-stop conditions, protected files, local-git-only, harness assumptions,
-permission matcher). The parallel skill's matching sections track it;
-divergence is only legitimate where N>1 constructs are load-bearing.
-When changing a shared mechanic, update both and check that the
-single-skill version is free of wave/parallel/MAX_PARALLEL vocabulary.
-
-## Commit messages
-
-Target ~10 lines of body; more only when the commit carries non-obvious
-decisions worth explaining. Avoid both one-liners and 30-line
-restatements of the diff. Autopsies (see above) live here, not in
-doctrine.
-
-## Pointers
 
 - `CONTEXT.md` — domain language (orchestrator/worker, round/wave,
   enforced/unenforced, write authority, path placement).
