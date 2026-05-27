@@ -10,7 +10,7 @@ integration tip after the worker reported `done`.
 
 That sequencing has the worker write the *transition* before the
 orchestrator does the *merge*. If the merge then fails (sibling-conflict,
-post-merge gate red, anything), the issue reads `done` while the work is
+post-merge gate fails, anything), the issue reads `done` while the work is
 not on integration. The next round's discovery — gated on
 `ready-for-agent` / `Status: ready-for-agent` — silently skips the issue.
 The tracker and the repo diverge with no signal. Workers also need
@@ -56,37 +56,37 @@ help anyway.
    gate exactly once. The merged subset that passes is what counts as
    the "round-pass" cohort.
 
-5. **`done` is written iff the merged-tip gate is green for a merged
+5. **`done` is written iff the merged-tip gate passes for a merged
    subset containing the issue.** Per-issue ordering: `merge → gate →
    label`. The label is a true signal of "this work is integrated and
-   the result gates green," not an optimistic worker self-report.
+   the result gates pass," not an optimistic worker self-report.
 
 6. **On merged-tip gate failure, the orchestrator attempts recovery
    before re-dispatching.** A failing round converts into bounded
    progress rather than total loss. The recovery flow:
 
    ```
-   A. Merged tip gate red. Note pre-wave tip; git reset --hard <pre-wave-tip>.
+   A. Merged tip gate fails. Note pre-wave tip; git reset --hard <pre-wave-tip>.
    B. For each merged-set branch B_i: gate B_i alone in a temp worktree.
-      - Green: B_i is a survivor.
-      - Red:   "post-hoc gate fail on isolation re-run" — comment on
-               B_i's issue, boot from this round, leave at ready-for-agent.
+      - Pass: B_i is a survivor.
+      - Fail: "post-hoc gate fail on isolation re-run" — comment on
+              B_i's issue, boot from this round, leave at ready-for-agent.
    C. If survivors is empty: round-fail-no-progress. Booted-issue
       comments are the record; no further action this round.
    D. Survivors is non-empty AND any branch was booted at B: re-merge
       survivors, gate.
-      - Green: label all survivors `done`. Round passes.
-      - Red:   proceed to E.
+      - Pass: label all survivors `done`. Round passes.
+      - Fail: proceed to E.
       (If nothing was booted at B, skip D — the merged state would be
       identical to A's failing state.)
    E. Leave-one-out across survivors. For each B_i in survivors:
       - Merge the (|survivors|-1)-subset excluding B_i. Gate.
-      - If green: label that subset `done`. Comment on B_i's issue
+      - If passing: label that subset `done`. Comment on B_i's issue
         ("passed alone but breaks the wave; retry next round").
         Round passes.
    F. If no (|survivors|-1)-subset passed: singleton fallback. Pick one
       survivor (lowest issue number is fine), merge it alone, **gate
-      it**, label `done` if green. Comment on every other survivor's
+      it**, label `done` if it passes. Comment on every other survivor's
       issue ("passed alone but breaks the wave with siblings X"). Round
       passes with 1 issue done.
    ```
@@ -95,12 +95,12 @@ help anyway.
    ordering (Decision #5). F repeats the gate even though step B
    already verified the singleton alone — a final sanity check on the
    exact integration-tip state being labelled, and consistency with
-   the rest of the algorithm. If F's gate goes red (a flake, or
+   the rest of the algorithm. If F's gate fails (a flake, or
    environment drift between B and F), the round makes no progress;
    no label is written.
 
    Recovery does **not** explore subset sizes between 1 and S-1. If
-   leave-one-out fails to find a green (S-1)-subset, the orchestrator
+   leave-one-out fails to find a passing (S-1)-subset, the orchestrator
    jumps straight to a singleton; it does not try (S-2)-subsets,
    (S-3)-subsets, etc.
 
@@ -123,7 +123,7 @@ help anyway.
 
 - **`done` becomes a high-trust signal.** Operators reading the tracker
   can rely on `done` meaning "this work is on the integration tip and
-  the gate was green when the label was written" — not "a worker
+  the gate passed when the label was written" — not "a worker
   thought it succeeded." The repo and tracker state stay in sync.
 
 - **The orchestrator gains a substantial post-wave phase.** `ORCHESTRATOR.md`

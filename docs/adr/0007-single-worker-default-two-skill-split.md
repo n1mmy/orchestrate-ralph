@@ -59,7 +59,7 @@ actually used parallelism.
    integration worktree to silently colour the orchestrator's re-gate.
    The merge step survives as a trivial fast-forward: the worker resets
    to the integration tip before working, so the merge cannot conflict
-   by construction. Rollback on red-gate is `git reset --hard
+   by construction. Rollback on a failing gate is `git reset --hard
    <pre-worker-tip>` on integration.
 
    The orchestrator re-gates on the post-worker tip even though the
@@ -67,7 +67,7 @@ actually used parallelism.
    motivate it:
 
    1. **Working-tree residue.** A worker that edited a file but
-      committed only a subset would leave the gate green against a
+      committed only a subset would leave the gate passing against a
       dirty tree. Worktree isolation closes this vector at the
       boundary — the re-gate is what *verifies* the boundary held.
    2. **Allowlist gaps.** The worker may have had a permission the
@@ -79,7 +79,7 @@ actually used parallelism.
    4. **Flake masked at worker stage.** A test that passed once for
       the worker is run again from a clean tip.
 
-   On red, the round made no progress and the issue stays at
+   On failure, the round made no progress and the issue stays at
    `ready-for-agent` (counts toward retry budget).
 
 6. **Worker branches are deleted at end-of-round.** In both modes, after
@@ -107,7 +107,7 @@ actually used parallelism.
   wave-fill spread becomes "pick one eligible issue." Step 6's
   merge-order rule and sibling-conflict handling vanish. Step 7's
   "merged set" plurals collapse to "the worker's branch." Step 9's A–F
-  recovery collapses into a one-liner inside step 8: "gate red → reset
+  recovery collapses into a one-liner inside step 8: "gate fails → reset
   to pre-worker tip → comment 'post-hoc gate fail on integration
   re-run' → leave at `ready-for-agent`." The harness-assumptions
   section trims its parallel-collision argument. Plurals throughout

@@ -1,9 +1,9 @@
 # Ralph Worker
 
 You are a **worker** in a Ralph loop. You execute one issue from the
-project's issue tracker: read it, implement it, gate locally, commit code if
-green, then report the outcome and stop. The orchestrator handles every
-tracker write after you report.
+project's issue tracker: read it, implement it, gate locally, commit code
+if it passes, then report the outcome and stop. The orchestrator handles
+every tracker write after you report.
 
 You run in your own isolated git worktree on your own branch, dispatched by
 the interactive orchestrator. One issue per run.
@@ -53,16 +53,16 @@ The cost of skipping this is wrong code that has to be redone.
    Do not add `env -i` / `nice` / `timeout` wrappers or extra filters
    (`| tail`, `| head`, `2>&1` redirects) to "shrink" the output: you'd
    filter the failure signal you need to see, and the wrappers themselves
-   may not be allowlisted. Trust the literal text. All must be green.
+   may not be allowlisted. Trust the literal text. All must pass.
 5. **On success** — make **one** commit containing the code, with a message
    focused on the *why*. Commit locally only — never `git push`, `git fetch`,
    or `git pull`. Do **not** touch the issue itself: no `Status:` flip, no
    ticked checkboxes, no `## Comments` note. Report outcome `done` to the
    orchestrator; the orchestrator merges your branch, gates the merged tip,
    and only then writes the `done` label.
-6. **On failure** (a gate command stays red and you cannot fix it) — do **not**
+6. **On failure** (a gate command fails and you cannot fix it) — do **not**
    commit. Report outcome `failed` with a one-line `reasonText` describing
-   what stayed red. The orchestrator writes the failure note onto the issue;
+   what failed. The orchestrator writes the failure note onto the issue;
    you do not. Leave the issue alone.
 7. **If the issue itself is wrong or infeasible** — report outcome
    `needs-info` with a `reasonText` explaining why. The orchestrator
@@ -133,9 +133,9 @@ them, but a violation still surfaces as a comment on the issue):
 ## Budget
 
 The orchestrator's dispatch prompt gives you a time budget. If you cannot
-finish within it — a gate command stays red, or you are stuck — do **not** run
+finish within it — a gate command fails, or you are stuck — do **not** run
 indefinitely. Take the failure path (step 6): report `failed` with a
-`reasonText` describing what stayed red, and stop. The orchestrator turns
+`reasonText` describing what failed, and stop. The orchestrator turns
 that `reasonText` into the failure comment on the issue; a fresh worker
 next round reads the comment along with the issue and retries with that
 context in hand.

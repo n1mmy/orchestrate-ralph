@@ -6,8 +6,8 @@ and dispatching workers as sub-agents in isolated git worktrees. This allows
 more flexible loop mechanics and also avoids using `claude --print`. 
 
 Included are both a traditional serial ralph loop, `/orchestrate-ralph`, and
-and opt-in `/orchestrate-ralph-parallel` skill that runs multiple workers simultaneously 
-and merges the results. If your tasks are spread out of multiple areas of code
+an opt-in `/orchestrate-ralph-parallel` skill that runs multiple workers simultaneously
+and merges the results. If your tasks are spread across multiple areas of code
 and have good `Blocked-by` markers parallel execution can save a lot of wall time.
 However if you have frequent
 conflicts in parallel tasks it can burn lots of tokens and actually be slower
@@ -15,7 +15,7 @@ than the serial loop.
 
 Projects must be set up with `/setup-ralph` before use. The source of issues
 read by ralph is described in markdown files in the repo and is designed to be
-initialized with [`/setup-matt-podock-skills`](https://github.com/mattpocock/skills)
+initialized with [`/setup-matt-pocock-skills`](https://github.com/mattpocock/skills)
 
 ## Contents
 
@@ -31,7 +31,7 @@ Four skills:
 - `/orchestrate-ralph-parallel/` — parallel-wave mode. Dispatches
   multiple workers per round and merges the results, dropping branches
   that conflict.
-- `/cleanup-ralph` — cleanup script that removed abandonded worktrees
+- `/cleanup-ralph` — cleanup script that removes abandoned worktrees
   that can result from interrupted ralph runs. Will prompt before doing any
   deletions.
 
@@ -46,8 +46,8 @@ Ralph is **tracker-agnostic** — local-markdown, GitHub, and GitLab are
 supported out of the box; any other tracker is described during `setup-ralph`.
 Parallel-wave mode (the `/orchestrate-ralph-parallel` skill) is only safe on
 a tracker that exposes a readable dependency relation; the single worker
-`/orchestrate-ralph` only needs issues to be sorted in an order that satisfys
-dependancies.
+`/orchestrate-ralph` only needs issues to be sorted in an order that satisfies
+dependencies.
 
 ## Install
 

@@ -106,11 +106,11 @@ harness isolates every sub-agent and so none of these can be delegated:
   comment on the issue in step 8 and leave it for a fresh worker to redo on
   top of the merge winner.
 - **Gate the merged tip** once per round (step 7). You read only pass/fail;
-  on red you enter recovery (step 9) rather than fixing it yourself.
+  on a failure you enter recovery (step 9) rather than fixing it yourself.
 - **Per-branch verify gates in recovery** (step 9). When the merged-tip gate
-  is red, you reset the integration worktree to each merged branch in turn
+  fails, you reset the integration worktree to each merged branch in turn
   and re-run the gate to isolate which branch(es) cause the failure. Pass/fail
-  only; on a per-branch red you boot the issue.
+  only; on a per-branch failure you boot the issue.
 - **Tracker writes in the transition phase** (step 8). Workers never write to
   the tracker; every label flip, status edit, and comment happens here, by
   your direct hand. The verbs differ per tracker (`gh issue edit` /
@@ -413,13 +413,13 @@ Once every step-6 merge has run, run the project gate **once** on the
 integration branch's merged tip (see the gate procedure below). This is the
 single authoritative gate of the round.
 
-- **Green** → the merged set is integrated *and verified*. Proceed to step 8;
+- **Pass** → the merged set is integrated *and verified*. Proceed to step 8;
   every worker in the merged set will receive the `done` write.
-- **Red** → a cross-issue break slipped past the workers' own gates (e.g.
+- **Fail** → a cross-issue break slipped past the workers' own gates (e.g.
   issue A changed a signature, issue B in another file called it; git merged
   clean, the build broke). Go to **step 9 (recover)**. Do not write `done`
   for anyone yet — the label is written only when the integration tip
-  containing the worker's branch gates green.
+  containing the worker's branch passes its gate.
 
 If the merged set is empty (every worker reported `failed`, `needs-info`, or
 merge-conflicted), skip the gate — there is nothing new to verify. Go
@@ -441,8 +441,8 @@ Per worker, by outcome class produced in steps 5–7:
 
 | Class | Tracker write |
 |---|---|
-| `done`, in the merged set, step-7 gate **green** | Transition the issue to `done`. |
-| `done`, in the merged set, step-7 gate **red** | (Handled in step 9; do not write here.) |
+| `done`, in the merged set, step-7 gate **passes** | Transition the issue to `done`. |
+| `done`, in the merged set, step-7 gate **fails** | (Handled in step 9; do not write here.) |
 | `merge-conflict` (step 6) | Comment naming the conflict (e.g. "merge conflict against `<sibling-branch>` — retry next round will branch off the merge winner"); leave at `ready-for-agent`. |
 | `failed`, with `reasonText` | Comment "attempt N: `<reasonText>`"; leave at `ready-for-agent`. |
 | `needs-info` | Transition to `needs-info`; comment with `reasonText`. Escalate (step 10). |
@@ -459,7 +459,7 @@ exhaustion, escalate (step 10), and count it once toward
 `MAX_CONSECUTIVE_FAILS`. (Local-markdown trackers count notes under
 `## Comments`; GitHub / GitLab count issue comments.)
 
-### 9 — Recover (only when step 7's gate was red)
+### 9 — Recover (only when step 7's gate failed)
 
 Convert a failing round into bounded progress.
 
@@ -472,8 +472,8 @@ its own ref.
 integration worktree to that branch (`git reset --hard <B_i>`), run the gate,
 then reset back to the pre-wave tip. *One* gate run per branch.
 
-- **Green** → `B_i` is a **survivor**.
-- **Red** → "post-hoc gate fail on isolation re-run." Boot the issue from
+- **Pass** → `B_i` is a **survivor**.
+- **Fail** → "post-hoc gate fail on isolation re-run." Boot the issue from
   this round: it joins step 8's tracker writes as a `failed`-class entry
   with `reasonText = "post-hoc gate fail on isolation re-run"`, leaves at
   `ready-for-agent`, and counts toward retry budget like any other failure.
@@ -487,15 +487,15 @@ at B* (otherwise the merged state would be identical to A's failing state,
 and re-trying loops). Merge each survivor with `git merge --no-ff`, then run
 the gate once.
 
-- **Green** → label every survivor `done` (this becomes their step-8 write).
+- **Pass** → label every survivor `done` (this becomes their step-8 write).
   Round passes.
-- **Red** → proceed to E.
+- **Fail** → proceed to E.
 
 **E. Leave-one-out.** For each branch `B_i` in survivors: reset to the
 pre-wave tip, merge the `(|survivors| − 1)`-subset *excluding* `B_i`, run the
-gate. Stop at the first green.
+gate. Stop at the first pass.
 
-- **Green** → label that subset `done`. Comment on `B_i`'s issue ("passed
+- **Pass** → label that subset `done`. Comment on `B_i`'s issue ("passed
   alone but breaks the wave; retry next round") and leave it at
   `ready-for-agent`. Round passes.
 
@@ -503,13 +503,13 @@ gate. Stop at the first green.
 single survivor (lowest issue number is fine), reset to the pre-wave tip,
 merge it alone, **gate it** — this final gate run is the consistency check
 on the exact tip being labelled, and matches the rest of the algorithm's
-`merge → gate → label` ordering. On green, label `done`; comment on every
+`merge → gate → label` ordering. On a pass, label `done`; comment on every
 other survivor's issue ("passed alone but breaks the wave with siblings —
-retry next round"). Round passes with **1** issue done. If F's gate goes
-red (a flake or environment drift between B and F), `git reset --hard
+retry next round"). Round passes with **1** issue done. If F's gate fails
+(a flake or environment drift between B and F), `git reset --hard
 <pre-wave-tip>` to return the integration branch to a clean state, write no
 label, and let the round make no progress — next round's workers must
-branch off a known-green tip.
+branch off a known-passing tip.
 
 Bounds: at most `2N + 3` gate runs per failing round (initial + N
 per-branch verifies + post-boot re-merge + N leave-one-out runs +
@@ -592,7 +592,7 @@ gate or bootstrap command — the summary must also (a) recommend the user run
 `/setup-ralph` with a one-line description of the symptom, and (b) quote the
 exact denied command string(s) verbatim, so the repair run starts from ground
 truth rather than a vague report. Do **not** recommend `/setup-ralph` for a
-code-shaped failure (a red gate from a real cross-issue break, exhausted
+code-shaped failure (a failing gate from a real cross-issue break, exhausted
 retries on genuine bugs) — `setup-ralph` repairs configuration, not code.
 
 ## Dispatch template and integration procedures
@@ -685,10 +685,10 @@ as written** — one `Bash` call per command, unmodified. Do not add `env -i`
 you need to see, and the wrappers may not be allowlisted. Truncation is
 your job after the fact, not the command's. Trust the literal text.
 
-Read only pass/fail and (on red) the first failure. Do not fix anything; do
-not commit. Green → continue per the calling step; red → continue per the
-calling step (step 7's red goes to recovery, step 9's per-branch red boots
-that branch).
+Read only pass/fail and (on a failure) the first failure. Do not fix
+anything; do not commit. Pass → continue per the calling step; fail →
+continue per the calling step (step 7's failure goes to recovery,
+step 9's per-branch failure boots that branch).
 
 ## Protected files — never modify
 
