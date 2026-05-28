@@ -204,11 +204,11 @@ signal you'd otherwise get on the first failure.
 
 Defaults; override in `docs/agents/ralph.md` if the project needs to.
 
-- `MAX_PARALLEL` — workers per wave. Default **5**. **Forced to 1** whenever
-  `docs/agents/ralph.md` has `parallel-safe: false` — without a readable
-  dependency relation, parallel waves are unsafe. Setting it to 1 is also the
-  deliberate off-switch (the loop collapses to serial with no code-path
-  change).
+- `MAX_PARALLEL` — workers per wave. Default **5**. Setting it to 1 is the
+  deliberate off-switch within parallel mode (the loop collapses to serial
+  with no code-path change). The `parallel-safe: false` case is handled by
+  the skill's prerequisite check — the skill halts and redirects to
+  `/orchestrate-ralph` before this config is read.
 - `WORKER_TIMEOUT` — per-worker budget. Default **25 min**. Advisory: you have
   no kill hook (step 4), so it is enforced worker-side — the dispatch template
   passes it to each worker as a self-limit.

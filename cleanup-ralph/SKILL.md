@@ -37,6 +37,31 @@ skill does not try to discriminate.
 Run each step in order. Use **bare `Bash` calls** (no `&&` chains) so each
 command's output is independently readable if something fails.
 
+### Preflight: warn if running under enforcement
+
+If `.claude/settings.local.json` exists in the primary repo root or in the
+current worktree, this session may be running under enforcement. Under
+`permissions.defaultMode: "dontAsk"`, any of the commands this skill
+issues that aren't allowlisted will silently auto-deny mid-flight,
+leaving the cleanup half-done with confusing output.
+
+Before step 1, tell the user the skill needs these `Bash` allow entries
+and that it may halt mid-run without them:
+
+- `Bash(git worktree list:*)`
+- `Bash(git worktree unlock:*)`
+- `Bash(git worktree remove:*)`
+- `Bash(git worktree prune:*)`
+- `Bash(git branch:*)` (covers `-d`, `-D`, `--list`)
+- `Bash(git merge-base:*)`
+- `Bash(git rev-parse:*)`
+- `Bash(kill -0:*)`
+- `Bash(ps:*)`
+
+Confirm the user wants to proceed; if they cancel, exit cleanly. If the
+settings file is absent (unenforced interactive session), skip this
+preflight and go straight to step 1.
+
 ### 1. Find this session's claude pid
 
 Walk the parent-process tree from `$$` until a process with `comm=claude`

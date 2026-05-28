@@ -11,9 +11,10 @@ Wired by `.ralph/settings.json` under `hooks.PreToolUse`. Reads the hook event
 JSON on stdin. On a violation it prints a deny decision and exits 0; otherwise
 it exits 0 silently so normal permission processing continues.
 
-Fail-open by design: if the event cannot be parsed or the worktree root cannot
-be resolved, the hook does not block. A crashing guard must never wedge an
-unattended run — the orchestrator's post-wave escape checks are the backstop.
+Fail-open by design: if the event cannot be parsed, the cwd is missing, or
+the worktree root cannot be resolved, the hook does not block. A crashing
+guard must never wedge an unattended run — the orchestrator's post-wave
+escape checks are the backstop.
 """
 import json
 import os
@@ -57,7 +58,13 @@ def main():
     if not target:
         sys.exit(0)
 
-    cwd = event.get("cwd") or os.getcwd()
+    # The harness sends cwd in every PreToolUse event for filesystem tools.
+    # Falling back to os.getcwd() would silently substitute the hook process's
+    # cwd — which may resolve to a different repo's worktree and allow writes
+    # this guard exists to deny. Fail open instead, per the docstring.
+    cwd = event.get("cwd")
+    if not cwd:
+        sys.exit(0)
 
     # The worktree root is the boundary. Derive it from the call's cwd, so the
     # hook is correct per-worker wherever the script itself happens to live.
