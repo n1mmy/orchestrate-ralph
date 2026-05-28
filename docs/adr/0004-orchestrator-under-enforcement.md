@@ -121,9 +121,12 @@ by ensuring claude was launched *after* the placement.
   earlier Phase 1 non-reproduction was specifically the *unenforced*
   parent case, which V1–V4 also showed fails uniformly — the new
   finding doesn't contradict it.
-- **`ADR 0003`'s "the orchestrator runs in the user's session" framing in
-  its permissions paragraph is still accurate**, just less load-bearing
-  now: the orchestrator's session is *also* enforced.
+- **`ADR 0003`'s setup-ralph still runs in the user's unenforced
+  session.** Repair mode has to be able to write
+  `.claude/settings.local.json` *before* claude reads it at next
+  startup; an enforced setup-ralph session could not. This ADR lifts
+  only the orchestrator; the `setup-ralph` session pattern is
+  unchanged.
 - **Setup-ralph's "never write `.claude/settings.local.json`" rule
   remains.** That rule is about not polluting the user's primary
   checkout; `orchestrate-ralph` places the file in a fresh worktree, not
