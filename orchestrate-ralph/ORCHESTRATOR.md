@@ -342,7 +342,7 @@ worker's, and step 6 reaps it.
 Reclassify two cases before moving on:
 
 - A worker reporting `done` whose branch carries no new commit
-  (`git log <worker-branch>` shows nothing new) becomes `failed` with
+  (`git rev-list --count <pre-round-tip>..<worker-branch>` returns 0) becomes `failed` with
   `reasonText = "no commit on branch — possible worktree escape, check other
   worktrees for stray commits"`. The original report is unreliable; the
   classification change travels into steps 6 and 8.

@@ -66,7 +66,7 @@ revisit.
   - **Git plumbing on shared refs** — `git update-ref` takes a ref name,
     not a path, so arg-locality has nothing to flag; worktrees share
     `.git/refs/`. **Committed-escape** (integration tip moved before the
-    orchestrator's first merge of the wave) is the only thing that sees it.
+    round's first merge) is the only thing that sees it.
 - `run_in_background: true` **silently drops** that isolation — the sub-agent
   then runs in the orchestrator's own worktree on the integration branch.
   Background dispatch is therefore unusable here: parallel workers would
@@ -188,9 +188,9 @@ signal you'd otherwise get on the first failure.
    load-bearing: a missing entry becomes a clean tool error (worker
    `Failure`, or — for you — a halt with a config-shaped summary), not a
    stalled prompt. If you see yourself or a worker denied on a gate or
-   bootstrap command, this is why — surface it and stop. The
-   `orchestrate-ralph` skill's session setup verifies enforcement is in
-   effect before invoking this doctrine; if you got here at all, it is.
+   bootstrap command, this is why — surface it and stop. This skill's
+   session setup verifies enforcement is in effect before invoking this
+   doctrine; if you got here at all, it is.
 3. **The env-bootstrap step, if any.** If `docs/agents/ralph.md` defines an
    env-bootstrap step, the gate (step 7) needs it. Each worker runs it in its
    own worktree; you run it **once, in your own integration worktree, before
@@ -224,7 +224,7 @@ Repeat the round below until a stop condition fires.
 ### 1 — Start of round: take in changes
 
 Before anything else, every round — and on every re-entry, whether from a user
-message or a fresh `orchestrate-ralph` invocation:
+message or a fresh invocation of this skill:
 
 - **Recover an interrupted wave first.** A worker's permission denial should
   not halt you (step 5), but if it does, you re-enter here. Look back at your
@@ -315,9 +315,9 @@ assumptions"):
 
 - **Committed escape** *(detects git-plumbing on shared refs)*. The
   integration branch's current tip must equal the pre-wave tip recorded in
-  step 2 — you have run no merge yet, and an isolated worker only ever
-  commits to its *own* branch, so the tip *cannot* have advanced on its
-  own. If it has, a worker used `git update-ref` or similar to smuggle a
+  step 2 — the round's first merge has not run yet, and an isolated worker
+  only ever commits to its *own* branch, so the tip *cannot* have advanced
+  on its own. If it has, a worker used `git update-ref` or similar to smuggle a
   commit onto the integration branch (a ref-name argument that arg-locality
   could not gate): **halt** on a worktree-isolation breach (see stop
   conditions). The branch's trust is broken; do not merge on top of it.
@@ -355,7 +355,7 @@ worker's, and step 6 reaps it.
 Reclassify two cases before moving on:
 
 - A worker reporting `done` whose branch carries no new commit
-  (`git log <worker-branch>` shows nothing new) becomes `failed` with
+  (`git rev-list --count <pre-wave-tip>..<worker-branch>` returns 0) becomes `failed` with
   `reasonText = "no commit on branch — possible worktree escape, check other
   worktrees for stray commits"`. The original report is unreliable; the
   classification change travels into steps 6 and 8.
@@ -571,7 +571,7 @@ Halt the loop when any of these hold:
 - **No eligible issues** — `ready-for-agent` issues remain but all are blocked
   (a dependency cycle or a stuck dependency).
 - **Worktree-isolation breach (committed)** — the integration tip moved before
-  any merge ran this wave (step 5). A worker escaped its worktree and committed
+  the round's first merge (step 5). A worker escaped its worktree and committed
   onto the integration branch; the branch's trust is broken. Halt and surface
   it for the user to inspect. An *untracked*-file escape is not a stop
   condition — step 5 detects it, cleans any merge collision, and continues.

@@ -25,8 +25,9 @@ same file, so either side can hit the denial; under
 `permissions.defaultMode: dontAsk` (the default) the denial is a clean tool
 error, under `default` it prompts the session running. Either way the
 underlying fix is the same — get the exact denied command string first,
-from the prompt, the worker's failure-class comment, or the
-`orchestrate-ralph` stop message.
+from the prompt, the worker's failure-class comment (written by the
+orchestrator in its transition phase), or the `orchestrate-ralph` stop
+message.
 
 Candidate causes, distinguished by comparing that string to `settings.json`:
 

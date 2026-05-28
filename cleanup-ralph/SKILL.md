@@ -37,30 +37,24 @@ skill does not try to discriminate.
 Run each step in order. Use **bare `Bash` calls** (no `&&` chains) so each
 command's output is independently readable if something fails.
 
-### Preflight: warn if running under enforcement
+### Preflight: refuse to run under enforcement
 
-If `.claude/settings.local.json` exists in the primary repo root or in the
-current worktree, this session may be running under enforcement. Under
-`permissions.defaultMode: "dontAsk"`, any of the commands this skill
-issues that aren't allowlisted will silently auto-deny mid-flight,
-leaving the cleanup half-done with confusing output.
+This skill cannot run under an enforced session. Step 1's parent-pid walk
+relies on shell constructs — `$$`, `$(...)`, a `while` loop, `&&` — that
+the Bash permission matcher denies on sight. No allowlist entry can rescue
+them: the matcher reads the raw command text, so `$$` and `$(...)` are
+structural denials, not missing-grant denials. (The per-worktree
+`git` / `kill` / `ps` calls in later steps could be allowlisted, but the
+pid walk cannot, so the run would die at step 1 regardless.)
 
-Before step 1, tell the user the skill needs these `Bash` allow entries
-and that it may halt mid-run without them:
+If `.claude/settings.local.json` exists in the primary repo root or the
+current worktree, the session is likely enforced. **Halt** and tell the
+user to re-run `/cleanup-ralph` from an ordinary, unenforced interactive
+session — typically the same checkout without the placed settings file,
+or a session started before `orchestrate-ralph` placed it. Do not attempt
+the flow under enforcement; it fails partway with opaque tool errors.
 
-- `Bash(git worktree list:*)`
-- `Bash(git worktree unlock:*)`
-- `Bash(git worktree remove:*)`
-- `Bash(git worktree prune:*)`
-- `Bash(git branch:*)` (covers `-d`, `-D`, `--list`)
-- `Bash(git merge-base:*)`
-- `Bash(git rev-parse:*)`
-- `Bash(kill -0:*)`
-- `Bash(ps:*)`
-
-Confirm the user wants to proceed; if they cancel, exit cleanly. If the
-settings file is absent (unenforced interactive session), skip this
-preflight and go straight to step 1.
+If the settings file is absent, proceed to step 1.
 
 ### 1. Find this session's claude pid
 

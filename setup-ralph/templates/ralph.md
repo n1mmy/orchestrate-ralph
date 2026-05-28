@@ -9,7 +9,7 @@ The orchestrator and its workers read this file at the start of every run.
 
 The ordered list of commands every change must pass. A worker runs the gate
 before committing; the orchestrator re-runs it on the integration branch after
-each wave. Every command must exit zero. Order matters — cheap checks first.
+each round. Every command must exit zero. Order matters — cheap checks first.
 
 ```
 <gate command 1, e.g. pnpm typecheck>
