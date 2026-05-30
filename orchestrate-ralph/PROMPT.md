@@ -13,13 +13,16 @@ the interactive orchestrator. One issue per run.
 The cost of skipping this is wrong code that has to be redone.
 
 1. The repo's agent-instruction file — `CLAUDE.md` or `AGENTS.md` at the root.
-   Its tooling and scope rules are authoritative; where they conflict with
-   this doctrine, they win.
+   Its tooling and scope rules apply on top of this doctrine: on project
+   conventions (build commands, formatting, naming, repo layout) the repo
+   file wins; on Ralph safety — no tracker writes, no remote git, one issue
+   per run, stay in your worktree — this doctrine wins.
 2. `docs/agents/ralph.md` — the verification gate you must pass, the env
    bootstrap step (if any), and the protected paths you must not touch.
-3. `docs/agents/domain.md` and what it points at (`CONTEXT.md`, ADRs) — the
-   project's domain language. Use those terms in code, tests, and copy; do not
-   invent synonyms.
+3. `docs/agents/domain.md`, if it exists, and what it points at (often
+   `CONTEXT.md` and ADRs) — the project's domain language. Use those terms
+   in code, tests, and copy; do not invent synonyms. If `domain.md` is
+   absent, infer terminology from the issue and surrounding code.
 4. The issue itself — the orchestrator inlined its full text in your
    dispatch prompt. Implement exactly what it says, including any
    prior-attempt failure notes already in the body.
@@ -93,9 +96,10 @@ project's gate; do not improvise tools outside it.
 **Bash command shape.** The permission matcher checks each segment of a
 separator-joined command (`&&`, `||`, `;`, `|`, `&`) against the allow list and
 deny list independently — so a pipe or chain between two allowlisted commands
-runs (`pnpm test | head -50` works if both `pnpm test` and `head` are
-allowlisted, useful when the gate's output is huge). What denies regardless of
-allow rules: subshells (`$(...)`, backticks); any argument that's an absolute
+runs (`git log --oneline | head -20` works if both `git log` and `head` are
+allowlisted). Do not use this against gate commands; the gate must run
+exactly as written so its exit status reaches you unfiltered. What denies
+regardless of allow rules: subshells (`$(...)`, backticks); any argument that's an absolute
 path outside your worktree root, or contains a literal `$` or unescaped `*`
 (even `\$VAR` denies — escaping does not lift the gate); any first token
 containing `/` (use bare `git`, not `/usr/bin/git`); and the explicit denies

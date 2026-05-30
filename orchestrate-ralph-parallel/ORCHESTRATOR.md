@@ -479,8 +479,8 @@ then reset back to the pre-wave tip. *One* gate run per branch.
   `ready-for-agent`, and counts toward retry budget like any other failure.
 
 **C. No survivors.** Every branch failed its own gate. The round makes no
-progress on `done`; the per-branch boot comments from B are the record. Skip
-to step 10.
+progress on `done`; the per-branch boot comments from B are the record.
+Proceed to step 8 to land those boot comments, then step 10.
 
 **D. Re-merge survivors and gate** — *only if at least one branch was booted
 at B* (otherwise the merged state would be identical to A's failing state,
@@ -507,9 +507,10 @@ on the exact tip being labelled, and matches the rest of the algorithm's
 other survivor's issue ("passed alone but breaks the wave with siblings —
 retry next round"). Round passes with **1** issue done. If F's gate fails
 (a flake or environment drift between B and F), `git reset --hard
-<pre-wave-tip>` to return the integration branch to a clean state, write no
-label, and let the round make no progress — next round's workers must
-branch off a known-passing tip.
+<pre-wave-tip>` to return the integration branch to a clean state and
+queue no new `done` label; B's boot comments still need to land, so
+proceed to step 8 with only those queued writes — next round's workers
+must branch off a known-passing tip.
 
 Bounds: at most `2N + 3` gate runs per failing round (initial + N
 per-branch verifies + post-boot re-merge + N leave-one-out runs +
@@ -517,10 +518,11 @@ singleton). The orchestrator **does not bisect**; it does not try subset
 sizes between `|survivors| − 1` and `1`. Deeper subset search is rejected
 on wall-time grounds.
 
-All label-writes from this step batch into step 8's transition commit (for
-local-markdown) or fire as their own API calls (for GitHub / GitLab) — same
-verbs, same place. Do not write any label that did not follow a `merge →
-gate → label` ordering inside this recovery flow.
+Every exit from step 9 proceeds through step 8: the boot comments from B
+and any `done` labels from D / E / F are queued there and committed
+(local-markdown) or fired (GitHub / GitLab) as step-8 writes. Do not write
+any label that did not follow a `merge → gate → label` ordering inside
+this recovery flow.
 
 ### 10 — Wave summary, then escalations
 

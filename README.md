@@ -39,8 +39,8 @@ Four skills:
 
 Ralph reads its issue queue through the issue-tracker configuration that
 [`setup-matt-pocock-skills`](https://github.com/mattpocock/skills) writes —
-`docs/agents/issue-tracker.md`, `docs/agents/triage-labels.md`,
-`docs/agents/domain.md`. Run that skill first, then `setup-ralph`.
+`docs/agents/issue-tracker.md` and `docs/agents/triage-labels.md`. Run that
+skill first, then `setup-ralph`.
 
 Ralph is **tracker-agnostic** — local-markdown, GitHub, and GitLab are
 supported out of the box; any other tracker is described during `setup-ralph`.

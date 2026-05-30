@@ -10,8 +10,9 @@ operations against this tracker. All operations use the `glab` CLI.
   are notes.
 - **Dependencies** — declared with GitLab linked issues, relationship "is
   blocked by". An issue is *eligible* only when every issue blocking it
-  is closed. This is a readable dependency relation, so this tracker is
-  **`parallel-safe`**.
+  carries the `done` label (closing is the user's call; the label is the
+  canonical completion marker the loop writes). This is a readable
+  dependency relation, so this tracker is **`parallel-safe`**.
   <!-- If this repo does NOT use GitLab linked-issue blocking, replace the two
   lines above with the convention you do use — e.g. a `Blocked by: #12` line
   in the description — and, if it is not reliably machine-readable, set
@@ -23,4 +24,9 @@ operations against this tracker. All operations use the `glab` CLI.
   `glab issue update <id> --unlabel ready-for-agent --label done`. When
   wrong or infeasible: `--unlabel ready-for-agent --label needs-info`.
   Whether `done` also closes the issue is the user's call.
-- **Comment** — `glab issue note <id> --message "<note>"`.
+- **Comment** — write the note to a worktree-local tempfile first
+  (e.g. `.ralph/note-body.tmp`), then
+  `glab issue note <id> --message-from-file <path>`. Do not pass the note
+  via `--message "<note>"`: worker `reasonText` may contain `"`, `$`,
+  backticks, `*`, or `;` that either break the shell or trip the matcher's
+  literal-`$` / unescaped-`*` denials.

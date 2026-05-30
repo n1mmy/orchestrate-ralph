@@ -104,9 +104,9 @@ harness isolates every sub-agent and so none of these can be delegated:
   working, so its branch is a strict descendant of integration; the merge
   advances the integration ref onto the worker's tip with no merge commit
   and no possibility of conflict. If `--ff-only` refuses (non-fast-forward),
-  treat it as a worker-doctrine bug and surface it — step 8's gate-failure
-  row covers this via the same `git reset --hard <pre-round-tip>` rollback,
-  which is a no-op because `--ff-only` aborts without mutating state.
+  treat it as a worker-doctrine bug and surface it via step 8's
+  non-fast-forward row; `--ff-only` aborts without mutating state, so no
+  rollback is needed.
 - **Gate the post-merge tip** once per round (step 7). You read only
   pass/fail; on a failure you reset and leave the issue at `ready-for-agent`
   rather than fixing it yourself.
@@ -411,6 +411,7 @@ By outcome class produced in steps 5–7:
 |---|---|
 | `done`, merged clean, step-7 gate **passes** | Transition the issue to `done`. |
 | `done`, merged clean, step-7 gate **fails** | `git reset --hard <pre-round-tip>`; comment "post-hoc gate fail on integration re-run"; leave at `ready-for-agent`; counts toward retry budget. |
+| `done`, merge refused as non-fast-forward | Comment "non-fast-forward merge refused — worker did not reset to integration tip before committing"; leave at `ready-for-agent`; counts toward retry budget. No rollback: `--ff-only` aborted without mutating state. |
 | `failed`, with `reasonText` | Comment "attempt N: `<reasonText>`"; leave at `ready-for-agent`. |
 | `needs-info` | Transition to `needs-info`; comment with `reasonText`. Escalate (step 9). |
 
@@ -563,9 +564,9 @@ In the integration worktree, on the integration branch:
 - Refuses *Not possible to fast-forward* → the worker's branch is not a
   strict descendant of integration. This is a worker-doctrine bug (the
   worker did not reset to the integration tip before working). Do **not**
-  drop `--ff-only` to recover; surface it via step 8's gate-failure row, which
-  resets to the pre-round tip (a no-op since `--ff-only` aborted without
-  mutating state) and leaves the issue at `ready-for-agent`.
+  drop `--ff-only` to recover; surface it via step 8's non-fast-forward
+  row, which leaves the issue at `ready-for-agent` with a failure comment.
+  `--ff-only` aborted without mutating state, so no rollback is needed.
 
 A clean `--ff-only` merge produces "Updating <sha>..<sha>" plus a fast-forward
 summary — bounded output, safe for the orchestrator's context.
