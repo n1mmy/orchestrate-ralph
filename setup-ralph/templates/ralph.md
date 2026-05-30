@@ -31,19 +31,10 @@ first thing; the orchestrator performs it before the gate. -->
 
 `parallel-safe: false`
 
-This is a **capability declaration**: set `true` only if the issue tracker
+<!-- Set `true` only if the issue tracker
 exposes a dependency relation that the orchestrator can read — see the
 "Ralph loop" section of `docs/agents/issue-tracker.md`. Without that
-relation, parallel waves are unsafe (a worker dispatched against an unmerged
-dependency has no base to build on).
-
-The single-worker `/orchestrate-ralph` skill (the canonical loop) ignores
-this flag entirely — it dispatches one worker per round and is always
-correct.
-
-The `/orchestrate-ralph-parallel` skill requires this flag to be `true` and
-halts otherwise; flip the flag only when you have judged the tracker's
-dependency relation correct and want to opt into parallel-wave mode.
+relation, parallel waves are unsafe. -->
 
 ## Protected paths
 
