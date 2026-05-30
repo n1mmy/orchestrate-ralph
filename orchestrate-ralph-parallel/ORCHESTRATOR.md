@@ -66,7 +66,7 @@ revisit.
   - **Git plumbing on shared refs** — `git update-ref` takes a ref name,
     not a path, so arg-locality has nothing to flag; worktrees share
     `.git/refs/`. **Committed-escape** (integration tip moved before the
-    orchestrator's first merge of the wave) is the only thing that sees it.
+    round's first merge) is the only thing that sees it.
 - `run_in_background: true` **silently drops** that isolation — the sub-agent
   then runs in the orchestrator's own worktree on the integration branch.
   Background dispatch is therefore unusable here: parallel workers would
@@ -106,11 +106,11 @@ harness isolates every sub-agent and so none of these can be delegated:
   comment on the issue in step 8 and leave it for a fresh worker to redo on
   top of the merge winner.
 - **Gate the merged tip** once per round (step 7). You read only pass/fail;
-  on red you enter recovery (step 9) rather than fixing it yourself.
+  on a failure you enter recovery (step 9) rather than fixing it yourself.
 - **Per-branch verify gates in recovery** (step 9). When the merged-tip gate
-  is red, you reset the integration worktree to each merged branch in turn
+  fails, you reset the integration worktree to each merged branch in turn
   and re-run the gate to isolate which branch(es) cause the failure. Pass/fail
-  only; on a per-branch red you boot the issue.
+  only; on a per-branch failure you boot the issue.
 - **Tracker writes in the transition phase** (step 8). Workers never write to
   the tracker; every label flip, status edit, and comment happens here, by
   your direct hand. The verbs differ per tracker (`gh issue edit` /
@@ -188,9 +188,9 @@ signal you'd otherwise get on the first failure.
    load-bearing: a missing entry becomes a clean tool error (worker
    `Failure`, or — for you — a halt with a config-shaped summary), not a
    stalled prompt. If you see yourself or a worker denied on a gate or
-   bootstrap command, this is why — surface it and stop. The
-   `orchestrate-ralph` skill's session setup verifies enforcement is in
-   effect before invoking this doctrine; if you got here at all, it is.
+   bootstrap command, this is why — surface it and stop. This skill's
+   session setup verifies enforcement is in effect before invoking this
+   doctrine; if you got here at all, it is.
 3. **The env-bootstrap step, if any.** If `docs/agents/ralph.md` defines an
    env-bootstrap step, the gate (step 7) needs it. Each worker runs it in its
    own worktree; you run it **once, in your own integration worktree, before
@@ -204,11 +204,11 @@ signal you'd otherwise get on the first failure.
 
 Defaults; override in `docs/agents/ralph.md` if the project needs to.
 
-- `MAX_PARALLEL` — workers per wave. Default **5**. **Forced to 1** whenever
-  `docs/agents/ralph.md` has `parallel-safe: false` — without a readable
-  dependency relation, parallel waves are unsafe. Setting it to 1 is also the
-  deliberate off-switch (the loop collapses to serial with no code-path
-  change).
+- `MAX_PARALLEL` — workers per wave. Default **5**. Setting it to 1 is the
+  deliberate off-switch within parallel mode (the loop collapses to serial
+  with no code-path change). The `parallel-safe: false` case is handled by
+  the skill's prerequisite check — the skill halts and redirects to
+  `/orchestrate-ralph` before this config is read.
 - `WORKER_TIMEOUT` — per-worker budget. Default **25 min**. Advisory: you have
   no kill hook (step 4), so it is enforced worker-side — the dispatch template
   passes it to each worker as a self-limit.
@@ -224,7 +224,7 @@ Repeat the round below until a stop condition fires.
 ### 1 — Start of round: take in changes
 
 Before anything else, every round — and on every re-entry, whether from a user
-message or a fresh `orchestrate-ralph` invocation:
+message or a fresh invocation of this skill:
 
 - **Recover an interrupted wave first.** A worker's permission denial should
   not halt you (step 5), but if it does, you re-enter here. Look back at your
@@ -315,9 +315,9 @@ assumptions"):
 
 - **Committed escape** *(detects git-plumbing on shared refs)*. The
   integration branch's current tip must equal the pre-wave tip recorded in
-  step 2 — you have run no merge yet, and an isolated worker only ever
-  commits to its *own* branch, so the tip *cannot* have advanced on its
-  own. If it has, a worker used `git update-ref` or similar to smuggle a
+  step 2 — the round's first merge has not run yet, and an isolated worker
+  only ever commits to its *own* branch, so the tip *cannot* have advanced
+  on its own. If it has, a worker used `git update-ref` or similar to smuggle a
   commit onto the integration branch (a ref-name argument that arg-locality
   could not gate): **halt** on a worktree-isolation breach (see stop
   conditions). The branch's trust is broken; do not merge on top of it.
@@ -355,7 +355,7 @@ worker's, and step 6 reaps it.
 Reclassify two cases before moving on:
 
 - A worker reporting `done` whose branch carries no new commit
-  (`git log <worker-branch>` shows nothing new) becomes `failed` with
+  (`git rev-list --count <pre-wave-tip>..<worker-branch>` returns 0) becomes `failed` with
   `reasonText = "no commit on branch — possible worktree escape, check other
   worktrees for stray commits"`. The original report is unreliable; the
   classification change travels into steps 6 and 8.
@@ -413,13 +413,13 @@ Once every step-6 merge has run, run the project gate **once** on the
 integration branch's merged tip (see the gate procedure below). This is the
 single authoritative gate of the round.
 
-- **Green** → the merged set is integrated *and verified*. Proceed to step 8;
+- **Pass** → the merged set is integrated *and verified*. Proceed to step 8;
   every worker in the merged set will receive the `done` write.
-- **Red** → a cross-issue break slipped past the workers' own gates (e.g.
+- **Fail** → a cross-issue break slipped past the workers' own gates (e.g.
   issue A changed a signature, issue B in another file called it; git merged
   clean, the build broke). Go to **step 9 (recover)**. Do not write `done`
   for anyone yet — the label is written only when the integration tip
-  containing the worker's branch gates green.
+  containing the worker's branch passes its gate.
 
 If the merged set is empty (every worker reported `failed`, `needs-info`, or
 merge-conflicted), skip the gate — there is nothing new to verify. Go
@@ -441,8 +441,8 @@ Per worker, by outcome class produced in steps 5–7:
 
 | Class | Tracker write |
 |---|---|
-| `done`, in the merged set, step-7 gate **green** | Transition the issue to `done`. |
-| `done`, in the merged set, step-7 gate **red** | (Handled in step 9; do not write here.) |
+| `done`, in the merged set, step-7 gate **passes** | Transition the issue to `done`. |
+| `done`, in the merged set, step-7 gate **fails** | (Handled in step 9; do not write here.) |
 | `merge-conflict` (step 6) | Comment naming the conflict (e.g. "merge conflict against `<sibling-branch>` — retry next round will branch off the merge winner"); leave at `ready-for-agent`. |
 | `failed`, with `reasonText` | Comment "attempt N: `<reasonText>`"; leave at `ready-for-agent`. |
 | `needs-info` | Transition to `needs-info`; comment with `reasonText`. Escalate (step 10). |
@@ -459,7 +459,7 @@ exhaustion, escalate (step 10), and count it once toward
 `MAX_CONSECUTIVE_FAILS`. (Local-markdown trackers count notes under
 `## Comments`; GitHub / GitLab count issue comments.)
 
-### 9 — Recover (only when step 7's gate was red)
+### 9 — Recover (only when step 7's gate failed)
 
 Convert a failing round into bounded progress.
 
@@ -472,30 +472,30 @@ its own ref.
 integration worktree to that branch (`git reset --hard <B_i>`), run the gate,
 then reset back to the pre-wave tip. *One* gate run per branch.
 
-- **Green** → `B_i` is a **survivor**.
-- **Red** → "post-hoc gate fail on isolation re-run." Boot the issue from
+- **Pass** → `B_i` is a **survivor**.
+- **Fail** → "post-hoc gate fail on isolation re-run." Boot the issue from
   this round: it joins step 8's tracker writes as a `failed`-class entry
   with `reasonText = "post-hoc gate fail on isolation re-run"`, leaves at
   `ready-for-agent`, and counts toward retry budget like any other failure.
 
 **C. No survivors.** Every branch failed its own gate. The round makes no
-progress on `done`; the per-branch boot comments from B are the record. Skip
-to step 10.
+progress on `done`; the per-branch boot comments from B are the record.
+Proceed to step 8 to land those boot comments, then step 10.
 
 **D. Re-merge survivors and gate** — *only if at least one branch was booted
 at B* (otherwise the merged state would be identical to A's failing state,
 and re-trying loops). Merge each survivor with `git merge --no-ff`, then run
 the gate once.
 
-- **Green** → label every survivor `done` (this becomes their step-8 write).
+- **Pass** → label every survivor `done` (this becomes their step-8 write).
   Round passes.
-- **Red** → proceed to E.
+- **Fail** → proceed to E.
 
 **E. Leave-one-out.** For each branch `B_i` in survivors: reset to the
 pre-wave tip, merge the `(|survivors| − 1)`-subset *excluding* `B_i`, run the
-gate. Stop at the first green.
+gate. Stop at the first pass.
 
-- **Green** → label that subset `done`. Comment on `B_i`'s issue ("passed
+- **Pass** → label that subset `done`. Comment on `B_i`'s issue ("passed
   alone but breaks the wave; retry next round") and leave it at
   `ready-for-agent`. Round passes.
 
@@ -503,13 +503,14 @@ gate. Stop at the first green.
 single survivor (lowest issue number is fine), reset to the pre-wave tip,
 merge it alone, **gate it** — this final gate run is the consistency check
 on the exact tip being labelled, and matches the rest of the algorithm's
-`merge → gate → label` ordering. On green, label `done`; comment on every
+`merge → gate → label` ordering. On a pass, label `done`; comment on every
 other survivor's issue ("passed alone but breaks the wave with siblings —
-retry next round"). Round passes with **1** issue done. If F's gate goes
-red (a flake or environment drift between B and F), `git reset --hard
-<pre-wave-tip>` to return the integration branch to a clean state, write no
-label, and let the round make no progress — next round's workers must
-branch off a known-green tip.
+retry next round"). Round passes with **1** issue done. If F's gate fails
+(a flake or environment drift between B and F), `git reset --hard
+<pre-wave-tip>` to return the integration branch to a clean state and
+queue no new `done` label; B's boot comments still need to land, so
+proceed to step 8 with only those queued writes — next round's workers
+must branch off a known-passing tip.
 
 Bounds: at most `2N + 3` gate runs per failing round (initial + N
 per-branch verifies + post-boot re-merge + N leave-one-out runs +
@@ -517,10 +518,11 @@ singleton). The orchestrator **does not bisect**; it does not try subset
 sizes between `|survivors| − 1` and `1`. Deeper subset search is rejected
 on wall-time grounds.
 
-All label-writes from this step batch into step 8's transition commit (for
-local-markdown) or fire as their own API calls (for GitHub / GitLab) — same
-verbs, same place. Do not write any label that did not follow a `merge →
-gate → label` ordering inside this recovery flow.
+Every exit from step 9 proceeds through step 8: the boot comments from B
+and any `done` labels from D / E / F are queued there and committed
+(local-markdown) or fired (GitHub / GitLab) as step-8 writes. Do not write
+any label that did not follow a `merge → gate → label` ordering inside
+this recovery flow.
 
 ### 10 — Wave summary, then escalations
 
@@ -571,7 +573,7 @@ Halt the loop when any of these hold:
 - **No eligible issues** — `ready-for-agent` issues remain but all are blocked
   (a dependency cycle or a stuck dependency).
 - **Worktree-isolation breach (committed)** — the integration tip moved before
-  any merge ran this wave (step 5). A worker escaped its worktree and committed
+  the round's first merge (step 5). A worker escaped its worktree and committed
   onto the integration branch; the branch's trust is broken. Halt and surface
   it for the user to inspect. An *untracked*-file escape is not a stop
   condition — step 5 detects it, cleans any merge collision, and continues.
@@ -592,7 +594,7 @@ gate or bootstrap command — the summary must also (a) recommend the user run
 `/setup-ralph` with a one-line description of the symptom, and (b) quote the
 exact denied command string(s) verbatim, so the repair run starts from ground
 truth rather than a vague report. Do **not** recommend `/setup-ralph` for a
-code-shaped failure (a red gate from a real cross-issue break, exhausted
+code-shaped failure (a failing gate from a real cross-issue break, exhausted
 retries on genuine bugs) — `setup-ralph` repairs configuration, not code.
 
 ## Dispatch template and integration procedures
@@ -685,10 +687,10 @@ as written** — one `Bash` call per command, unmodified. Do not add `env -i`
 you need to see, and the wrappers may not be allowlisted. Truncation is
 your job after the fact, not the command's. Trust the literal text.
 
-Read only pass/fail and (on red) the first failure. Do not fix anything; do
-not commit. Green → continue per the calling step; red → continue per the
-calling step (step 7's red goes to recovery, step 9's per-branch red boots
-that branch).
+Read only pass/fail and (on a failure) the first failure. Do not fix
+anything; do not commit. Pass → continue per the calling step; fail →
+continue per the calling step (step 7's failure goes to recovery,
+step 9's per-branch failure boots that branch).
 
 ## Protected files — never modify
 

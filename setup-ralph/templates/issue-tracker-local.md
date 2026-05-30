@@ -13,6 +13,10 @@ operations against this tracker:
   file names the issues this one depends on. An issue is *eligible* only
   when every issue it is blocked by has `Status: done`. This is a readable
   dependency relation, so this tracker is **`parallel-safe`**.
+  <!-- If your issues do NOT use a machine-readable `Blocked by:` line —
+  dependencies are only described in prose, or not tracked — set
+  `parallel-safe: false` in docs/agents/ralph.md so the loop runs serially. -->
+
 - **Feature grouping** — the parent directory `<feature-dir>` is the
   feature. When more issues are eligible than a wave can hold, prefer a
   spread across distinct features.

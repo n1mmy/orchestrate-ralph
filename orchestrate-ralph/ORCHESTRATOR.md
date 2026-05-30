@@ -104,11 +104,11 @@ harness isolates every sub-agent and so none of these can be delegated:
   working, so its branch is a strict descendant of integration; the merge
   advances the integration ref onto the worker's tip with no merge commit
   and no possibility of conflict. If `--ff-only` refuses (non-fast-forward),
-  treat it as a worker-doctrine bug and surface it — step 8's red-gate row
-  covers this via the same `git reset --hard <pre-round-tip>` rollback,
-  which is a no-op because `--ff-only` aborts without mutating state.
+  treat it as a worker-doctrine bug and surface it via step 8's
+  non-fast-forward row; `--ff-only` aborts without mutating state, so no
+  rollback is needed.
 - **Gate the post-merge tip** once per round (step 7). You read only
-  pass/fail; on red you reset and leave the issue at `ready-for-agent`
+  pass/fail; on a failure you reset and leave the issue at `ready-for-agent`
   rather than fixing it yourself.
 - **Tracker writes in the transition phase** (step 8). Workers never write to
   the tracker; every label flip, status edit, and comment happens here, by
@@ -165,10 +165,10 @@ signal you'd otherwise get on the first failure.
    merges back into it, and when the run ends you hand that branch to the user.
    - It must **not** be the repo's default branch (`main` / `master`) — the
      loop fast-forwards the branch with worker commits and resets it hard
-     on red gates, neither of which belongs on the trunk. Check against
+     on gate failures, neither of which belongs on the trunk. Check against
      `git symbolic-ref refs/remotes/origin/HEAD` (or the known default).
    - The working tree must be **clean** (`git status --porcelain` empty) — a
-     red gate triggers `git reset --hard`, which would destroy any
+     failing gate triggers `git reset --hard`, which would destroy any
      uncommitted work.
    - Running in a **separate git worktree**, not the repo's primary checkout,
      is strongly preferred: the loop is long-lived and ties up wherever it
@@ -255,7 +255,7 @@ message or a fresh `orchestrate-ralph` invocation:
 - If no issue is eligible but `ready-for-agent` issues remain (all blocked),
   halt and surface it.
 - Record the integration tip (`git rev-parse HEAD`) — the **pre-round tip**,
-  needed by step 8's red-gate rollback — plus the round start time (`date
+  needed by step 8's gate-failure rollback — plus the round start time (`date
   +%s`) for step 9's summary, and a pre-round untracked-files baseline
   (`git status --porcelain`) needed for the untracked-escape check in step 5.
 
@@ -342,7 +342,7 @@ worker's, and step 6 reaps it.
 Reclassify two cases before moving on:
 
 - A worker reporting `done` whose branch carries no new commit
-  (`git log <worker-branch>` shows nothing new) becomes `failed` with
+  (`git rev-list --count <pre-round-tip>..<worker-branch>` returns 0) becomes `failed` with
   `reasonText = "no commit on branch — possible worktree escape, check other
   worktrees for stray commits"`. The original report is unreliable; the
   classification change travels into steps 6 and 8.
@@ -385,11 +385,11 @@ ref, and step 9's branch reap collects it at end-of-round.
 Run the project gate **once** on the integration branch's post-merge tip (see
 the gate procedure below).
 
-- **Green** → the worker's branch is integrated *and verified*. Proceed to
+- **Pass** → the worker's branch is integrated *and verified*. Proceed to
   step 8; the worker will receive the `done` write.
-- **Red** → a flake, an allowlist gap that masked the gate at the worker, a
+- **Fail** → a flake, an allowlist gap that masked the gate at the worker, a
   dropped wrapper, or working-tree residue the boundary did not catch. Go
-  to step 8's red-gate row; the round makes no progress this time.
+  to step 8's gate-failure row; the round makes no progress this time.
 
 If the worker reported `failed` / `needs-info` (no merge ran), skip the gate
 — there is nothing new to verify. Go straight to step 8.
@@ -409,8 +409,9 @@ By outcome class produced in steps 5–7:
 
 | Class | Tracker write |
 |---|---|
-| `done`, merged clean, step-7 gate **green** | Transition the issue to `done`. |
-| `done`, merged clean, step-7 gate **red** | `git reset --hard <pre-round-tip>`; comment "post-hoc gate fail on integration re-run"; leave at `ready-for-agent`; counts toward retry budget. |
+| `done`, merged clean, step-7 gate **passes** | Transition the issue to `done`. |
+| `done`, merged clean, step-7 gate **fails** | `git reset --hard <pre-round-tip>`; comment "post-hoc gate fail on integration re-run"; leave at `ready-for-agent`; counts toward retry budget. |
+| `done`, merge refused as non-fast-forward | Comment "non-fast-forward merge refused — worker did not reset to integration tip before committing"; leave at `ready-for-agent`; counts toward retry budget. No rollback: `--ff-only` aborted without mutating state. |
 | `failed`, with `reasonText` | Comment "attempt N: `<reasonText>`"; leave at `ready-for-agent`. |
 | `needs-info` | Transition to `needs-info`; comment with `reasonText`. Escalate (step 9). |
 
@@ -451,7 +452,7 @@ Optionally fire a `PushNotification` on a **halt** or a **round summary** —
 never per issue (too noisy).
 
 After the summary is out, reap the worker's branch: `git branch -D
-<worker-branch>` as one bare `Bash` call. On the `done`-green path the
+<worker-branch>` as one bare `Bash` call. On the `done`-pass path the
 worker's commits are part of the integration branch's linear history (the
 step-6 fast-forward moved integration onto them); on every other path the
 commit (if any) lives in the reflog for 90 days, so nothing is lost. The
@@ -488,7 +489,7 @@ the worker denied on a gate or bootstrap command — the summary must also
 (a) recommend the user run `/setup-ralph` with a one-line description of
 the symptom, and (b) quote the exact denied command string(s) verbatim, so
 the repair run starts from ground truth rather than a vague report. Do
-**not** recommend `/setup-ralph` for a code-shaped failure (a red gate from
+**not** recommend `/setup-ralph` for a code-shaped failure (a failing gate from
 a real bug, exhausted retries on genuine problems) — `setup-ralph` repairs
 configuration, not code.
 
@@ -563,9 +564,9 @@ In the integration worktree, on the integration branch:
 - Refuses *Not possible to fast-forward* → the worker's branch is not a
   strict descendant of integration. This is a worker-doctrine bug (the
   worker did not reset to the integration tip before working). Do **not**
-  drop `--ff-only` to recover; surface it via step 8's red-gate row, which
-  resets to the pre-round tip (a no-op since `--ff-only` aborted without
-  mutating state) and leaves the issue at `ready-for-agent`.
+  drop `--ff-only` to recover; surface it via step 8's non-fast-forward
+  row, which leaves the issue at `ready-for-agent` with a failure comment.
+  `--ff-only` aborted without mutating state, so no rollback is needed.
 
 A clean `--ff-only` merge produces "Updating <sha>..<sha>" plus a fast-forward
 summary — bounded output, safe for the orchestrator's context.
@@ -584,10 +585,10 @@ output: you'd filter the failure signal you need to see, and the wrappers
 may not be allowlisted. Truncation is your job after the fact, not the
 command's. Trust the literal text.
 
-Read only pass/fail and (on red) the first failure. Do not fix anything; do
-not commit. Green → continue to step 8 (the `done`-green row); red →
-continue to step 8 (the red-gate row, which rolls integration back to the
-pre-round tip).
+Read only pass/fail and (on a failure) the first failure. Do not fix
+anything; do not commit. Pass → continue to step 8 (the `done`-pass row);
+fail → continue to step 8 (the gate-failure row, which rolls integration
+back to the pre-round tip).
 
 ## Protected files — never modify
 

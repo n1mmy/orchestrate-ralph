@@ -10,8 +10,9 @@ operations against this tracker. All operations use the `gh` CLI.
   comments.
 - **Dependencies** — declared with GitHub's native issue dependencies
   ("blocked by"). An issue is *eligible* only when every issue blocking
-  it is closed. This is a readable dependency relation, so this tracker
-  is **`parallel-safe`**.
+  it carries the `done` label (closing is the user's call; the label is
+  the canonical completion marker the loop writes). This is a readable
+  dependency relation, so this tracker is **`parallel-safe`**.
   <!-- If this repo does NOT use GitHub's native issue dependencies, replace
   the two lines above with the convention you do use — e.g. a
   `Blocked by: #12, #15` line in the issue body — and, if that convention is
@@ -25,4 +26,9 @@ operations against this tracker. All operations use the `gh` CLI.
   When wrong or infeasible:
   `--remove-label ready-for-agent --add-label needs-info`. Whether `done`
   also closes the issue is the user's call; only the label is set.
-- **Comment** — `gh issue comment <number> --body "<note>"`.
+- **Comment** — write the note to a worktree-local tempfile first
+  (e.g. `.ralph/comment-body.tmp`), then
+  `gh issue comment <number> --body-file <path>`. Do not pass the note via
+  `--body "<note>"`: worker `reasonText` may contain `"`, `$`, backticks,
+  `*`, or `;` that either break the shell or trip the matcher's
+  literal-`$` / unescaped-`*` denials.

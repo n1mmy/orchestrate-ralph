@@ -68,10 +68,10 @@ pre-round-tip reset inside the transition; there is no separate
 recovery phase.
 
 A **parallel-mode** round adds an optional **recover** phase that runs
-when the post-merge gate is failed:
+when the post-merge gate fails:
 
 **dispatch** → **collect** → **merge** → **gate** → **transition** →
-(**recover** if gate failed).
+(**recover** if gate fails).
 
 - **Dispatch** — orchestrator discovers eligible issues per the tracker,
   spawns one or more workers (one in single mode; up to `MAX_PARALLEL`
@@ -87,19 +87,19 @@ when the post-merge gate is failed:
 - **Gate** — orchestrator runs the project gate **once** on the
   post-merge integration tip. This is the only gate the orchestrator
   runs in the normal path.
-- **Transition** — on gate green, the merged subset's issues are
+- **Transition** — on a passing gate, the merged subset's issues are
   labelled `done`; per-issue `needs-info` and `failed` outcomes from
   collect get their respective writes (or no-op). Comments are written
   here too — failure-reason text from worker reports, and (in parallel
   mode) conflict notes from merge and recovery breadcrumbs from recover.
 - **Recover** *(parallel mode only)* — runs when the merge-tip gate
-  goes red. The orchestrator reverts to the pre-wave tip, re-gates each
+  fails. The orchestrator reverts to the pre-wave tip, re-gates each
   merged branch alone, **boots** any whose individual gate now fails,
   then re-tries the merge with **survivors** (the branches that passed
   the per-branch re-gate). If the survivor-merge still fails the gate,
   one pass of leave-one-out tries each (S-1)-subset; if none pass, a
   singleton fallback merges one survivor, gates that merge, and labels
-  on green — typically making at least one issue's worth of progress
+  on a pass — typically making at least one issue's worth of progress
   per round (a flake or environment drift at the singleton gate can
   still produce a no-progress round). No subset sizes between 1 and
   S-1 are explored. Every label-writing step follows `merge → gate →

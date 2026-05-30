@@ -37,6 +37,25 @@ skill does not try to discriminate.
 Run each step in order. Use **bare `Bash` calls** (no `&&` chains) so each
 command's output is independently readable if something fails.
 
+### Preflight: refuse to run under enforcement
+
+This skill cannot run under an enforced session. Step 1's parent-pid walk
+relies on shell constructs — `$$`, `$(...)`, a `while` loop, `&&` — that
+the Bash permission matcher denies on sight. No allowlist entry can rescue
+them: the matcher reads the raw command text, so `$$` and `$(...)` are
+structural denials, not missing-grant denials. (The per-worktree
+`git` / `kill` / `ps` calls in later steps could be allowlisted, but the
+pid walk cannot, so the run would die at step 1 regardless.)
+
+If `.claude/settings.local.json` exists in the primary repo root or the
+current worktree, the session is likely enforced. **Halt** and tell the
+user to re-run `/cleanup-ralph` from an ordinary, unenforced interactive
+session — typically the same checkout without the placed settings file,
+or a session started before `orchestrate-ralph` placed it. Do not attempt
+the flow under enforcement; it fails partway with opaque tool errors.
+
+If the settings file is absent, proceed to step 1.
+
 ### 1. Find this session's claude pid
 
 Walk the parent-process tree from `$$` until a process with `comm=claude`

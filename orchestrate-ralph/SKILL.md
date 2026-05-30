@@ -28,7 +28,7 @@ failure. For the file-existence checks in item 1, prefer `Read` or `Glob`
 2. **You are on a clean, dedicated integration branch — ideally in a separate
    worktree.** The branch you are on becomes the integration branch: the
    worker branches off it, its merge lands on it, and `git reset --hard` may
-   run on it (a red gate rolls integration back to the pre-round tip). So
+   run on it (a failing gate rolls integration back to the pre-round tip). So
    it must not be the repo's default branch (`main` / `master`), the
    working tree must be clean, and it should be a branch the user is happy
    to hand back. A fresh `git worktree` satisfies all of this and keeps the
