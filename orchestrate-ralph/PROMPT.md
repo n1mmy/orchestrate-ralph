@@ -73,13 +73,6 @@ The cost of skipping this is wrong code that has to be redone.
    placeholder or partial work.
 8. **Stop.** Do not pull the next issue into this run.
 
-The split is doctrine, not enforcement: the allow list in `.ralph/settings.json`
-is shared between you and the orchestrator, so a write call
-against the tracker would *succeed* — and would also be a visible doctrine
-violation surfacing in the issue's own thread. Treat tracker writes as
-out-of-scope for the worker role; if the orchestrator's outcome handling is
-buggy, the fix lives there, not in a worker-side workaround.
-
 ## Tooling discipline
 
 Follow the repo's own agent-instruction file first. Absent guidance there: file
