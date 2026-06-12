@@ -50,12 +50,19 @@ dependencies.
 
 ## Install
 
-Copy or symlink the four skill directories into your skills directory
-(`~/.claude/skills/` or `<project>/.claude/skills`):
+Install by symlinking each of the four skills into your skills
+directory (globally at `~/.claude/skills/` or per project at
+`<project>/.claude/skills`).
 
-```
-~/.claude/skills/setup-ralph                 →  setup-ralph/
-~/.claude/skills/orchestrate-ralph           →  orchestrate-ralph/
-~/.claude/skills/orchestrate-ralph-parallel  →  orchestrate-ralph-parallel/
-~/.claude/skills/cleanup-ralph               →  cleanup-ralph/
+Copy-paste to clone and symlink. Update `TARGET` to pick a different
+install location.
+
+```sh
+TARGET=~/.claude/skills
+
+git clone https://github.com/n1mmy/orchestrate-ralph.git ~/.orchestrate-ralph
+mkdir -p "$TARGET"
+for skill in setup-ralph orchestrate-ralph orchestrate-ralph-parallel cleanup-ralph; do
+  ln -s ~/.orchestrate-ralph/"$skill" "$TARGET"/"$skill"
+done
 ```
